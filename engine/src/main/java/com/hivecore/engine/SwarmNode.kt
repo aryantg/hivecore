@@ -328,11 +328,11 @@ class SwarmNode(
         val recipe = recipeDefs(spec.recipeId)?.toRecipe()?.takeIf { spec.recipeVersion.isEmpty() || it.version == spec.recipeVersion }
             ?: recipes(spec.recipeId, spec.recipeVersion)
         val jobs = recipe?.let { SplitJob.forWorkload(spec, it) }
-        if (jobs.isNullOrEmpty()) return flow {
+        if (recipe == null || jobs.isNullOrEmpty()) return flow {
             emit(SplitProgress(spec.jobId, "", "", "", emptyList(), emptyList(), 0, 0, 0.0, 0.0, 0.0, 0, 0, 0, done = false,
                 error = "recipe ${spec.recipeId}@${spec.recipeVersion} is not installed"))
         }
-        return runStages(spec.jobId, RecipeJobs.Staged(jobs, emptyList()))
+        return runStages(spec.jobId, RecipeJobs.Staged(jobs, recipe.stages.filter { it.inputs.isNotEmpty() }.map { it.id }))
     }
 
     /** Runs each stage as one split job, in order; the last emission carries `{stages: {stageId: result}}` (+ `skipped`). */

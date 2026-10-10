@@ -1,0 +1,21 @@
+{
+  "id": "photo_text",
+  "version": "1",
+  "title": "Photo text (OCR)",
+  "produces": "The text lines of every photo, with their boxes, one row per photo in t_job_photo_text",
+  "axis": "shard",
+  "merge": "concat",
+  "input": "images",
+  "itemKinds": ["image"],
+  "sink": "table",
+  "table": "t_job_photo_text",
+  "replicate": "sample:0.1",
+  "stages": [
+    {"id": "ocr", "op": "OCR", "params": {"item": "{item}"}}
+  ],
+  "outputSchema": [
+    {"name": "item", "type": "TEXT", "identifier": true},
+    {"name": "lines", "type": "INTEGER"},
+    {"name": "text", "type": "TEXT"}
+  ]
+}

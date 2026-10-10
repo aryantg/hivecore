@@ -25,7 +25,8 @@ import java.io.File
  * is plain JSON built in a fixed shape from deterministic values, so replicas compare by canonical JSON.
  *
  * Inputs (by task input order; the first input of the right shape is used):
- *  - OCR: `blobs[0]` (an image) or `params.path` → `{"lines":[{"text","left","top","right","bottom"}…]}`;
+ *  - OCR: the image blobs → `{"op":"OCR","items":[{"item","lines":[…]}…]}`, one item per blob; or `params.path` →
+ *    `{"lines":[{"text","left","top","right","bottom"}…]}`. An OCR output with exactly one item also reads as its lines;
  *  - LAYOUT: an OCR output → `{"rows":[[cell…]…],"text":[row…],"pairs":[{"key","label","value","row","how"}…]}`;
  *  - DOC_CLASSIFY: an OCR or LAYOUT output (or `params.text`), `params.filename` optional →
  *    `{"class","by","confidence","agreeing","runs","options","votes","scores"}`, class null when undecided;
@@ -64,9 +65,16 @@ class DocAiExecutor(
     } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: IllegalArgumentException) { Result.failure(e) }
 
     private suspend fun runOcr(task: TaskSpec, blobs: List<File>): Result<JsonElement> {
-        val path = blobs.firstOrNull()?.path ?: str(task.params["path"]) ?: return missingInput(task, "an image")
-        val lines = ocr.lines(path).getOrElse { return Result.failure(it) }
-        return Result.success(ocrJson(lines))
+        if (blobs.isEmpty()) {
+            val path = str(task.params["path"]) ?: return missingInput(task, "an image")
+            return Result.success(ocrJson(ocr.lines(path).getOrElse { return Result.failure(it) }))
+        }
+        // A shard chunk carries several photos: one item per blob, in order, so the concat merge keeps every page.
+        val items = blobs.map { f ->
+            val lines = ocr.lines(f.path).getOrElse { return Result.failure(it) }
+            JsonObject(linkedMapOf<String, JsonElement>("item" to JsonPrimitive(f.name)) + ocrJson(lines))
+        }
+        return Result.success(buildJsonObject { put("op", Op.OCR.name); put("items", JsonArray(items)) })
     }
 
     private suspend fun runClassify(task: TaskSpec, inputs: List<JsonElement>): Result<JsonElement> {
@@ -166,7 +174,9 @@ class DocAiExecutor(
 
         /** OCR lines from an OCR output, or null. */
         fun linesOf(e: JsonElement): List<OcrLine>? {
-            val arr = (e as? JsonObject)?.get("lines") as? JsonArray ?: return null
+            val o = e as? JsonObject ?: return null
+            val single = (o["items"] as? JsonArray)?.singleOrNull() as? JsonObject
+            val arr = o["lines"] as? JsonArray ?: single?.get("lines") as? JsonArray ?: return null
             return arr.map { x ->
                 val o = x as? JsonObject ?: return null
                 OcrLine(str(o["text"]) ?: return null, int(o["left"]) ?: return null, int(o["top"]) ?: return null,

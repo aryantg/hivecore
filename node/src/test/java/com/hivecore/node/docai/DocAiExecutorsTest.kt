@@ -68,10 +68,21 @@ class DocAiExecutorsTest {
         val (ex, _) = executor()
         val ocr = ex.execute(task(Op.OCR), emptyList(), listOf(File("id.png"))).getOrThrow()
         val canon = Canon.canonical(ocr)
-        assertTrue(canon, canon.startsWith("""{"lines":[{"bottom":56,"left":40,"right":230,"text":"GOVERNMENT OF INDIA","top":40},"""))
+        assertTrue(canon, canon.startsWith("""{"items":[{"item":"id.png","lines":[{"bottom":56,"left":40,"right":230,"text":"GOVERNMENT OF INDIA","top":40},"""))
         assertEquals(DocTestData.ID_CARD.lines().size, DocAiExecutor.linesOf(ocr)!!.size)
-        // params.path is the fallback when no blob is attached
-        assertEquals(ocr, ex.execute(task(Op.OCR, mapOf("path" to "id.png")), emptyList(), emptyList()).getOrThrow())
+        // params.path is the fallback when no blob is attached: the bare line list
+        val byPath = ex.execute(task(Op.OCR, mapOf("path" to "id.png")), emptyList(), emptyList()).getOrThrow()
+        assertEquals(DocAiExecutor.linesOf(ocr), DocAiExecutor.linesOf(byPath))
+    }
+
+    @Test fun ocrReadsEveryBlobOfAShardChunk() = runTest {
+        val (ex, _) = executor()
+        val ocr = ex.execute(task(Op.OCR), emptyList(), listOf(File("invoice_01.png"), File("id.png"), File("invoice_10.png"))).getOrThrow() as JsonObject
+        val items = ocr.getValue("items") as kotlinx.serialization.json.JsonArray
+        assertEquals(listOf("invoice_01.png", "id.png", "invoice_10.png"), items.map { ((it as JsonObject).getValue("item") as JsonPrimitive).content })
+        assertEquals(DocTestData.ID_CARD.lines().size, DocAiExecutor.linesOf(items[1])!!.size)
+        // several pages are not one page's lines
+        assertEquals(null, DocAiExecutor.linesOf(ocr))
     }
 
     @Test fun outputsAreStableAcrossRunsAndExecutors() = runTest {

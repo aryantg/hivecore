@@ -12,7 +12,6 @@ import com.hivecore.core.Verify
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -281,6 +280,8 @@ class SecureTransport(
     // ---- guarded by `lock` ----
     private val byEndpoint = HashMap<String, Session>()
     private val pending = HashMap<String, Handshake>()
+    // consecutive timed-out handshakes per endpoint key (expireLater)
+    private val retries = HashMap<String, Int>()
     private val waiters = HashMap<String, MutableList<CompletableDeferred<Session>>>()
     private var innerConnected: List<PeerEndpoint> = emptyList()
     private val collectors = ArrayList<Job>()
@@ -315,22 +316,7 @@ class SecureTransport(
         inboundReady.await()
         inner.setPairingMode(synchronized(lock) { pairingMode })
         inner.start(localName)
-        synchronized(lock) {
-            collectors += scope.launch { inner.connected.collect { onInnerConnected(it) } }
-            // A handshake that never completed (a lost or crossed frame) is dropped after the handshake timeout and
-            // started again while the link is still there; otherwise the link stays dead for good.
-            collectors += scope.launch {
-                while (kotlinx.coroutines.currentCoroutineContext().isActive) {
-                    kotlinx.coroutines.delay(handshakeTimeoutMs / 3)
-                    val stale = synchronized(lock) {
-                        val now = clock()
-                        pending.filterValues { now - it.startedAt > handshakeTimeoutMs }.keys.toList().also { ks -> ks.forEach { pending.remove(it) } }
-                            .mapNotNull { k -> innerConnected.firstOrNull { key(it) == k && k !in byEndpoint } }
-                    }
-                    for (ep in stale) { SLog.d(TAG, "handshake with ${ep.displayName} timed out; starting again"); initiate(ep) }
-                }
-            }
-        }
+        synchronized(lock) { collectors += scope.launch { inner.connected.collect { onInnerConnected(it) } } }
     }
 
     override suspend fun stop() {
@@ -499,10 +485,33 @@ class SecureTransport(
         val frame = Bytes().u8(TAG_INIT).u8(PROTO).blob(hs.eDer).bytes()
         hs.h = NoiseCrypto.sha256(H0, frame)
         synchronized(lock) { pending[key(ep)] = hs }
+        expireLater(ep, hs)
         val r = inner.send(ep, frame)
         if (r.isFailure) {
             synchronized(lock) { if (pending[key(ep)] === hs) pending.remove(key(ep)) }
             SLog.w(TAG, "SESSION_INIT to ${ep.displayName} not sent: ${r.exceptionOrNull()?.message}")
+        }
+    }
+
+    /**
+     * Phone gate finding: a handshake that never completed (a lost or crossed frame) is dropped after the handshake
+     * timeout and started again while the link is still there, at most [MAX_HANDSHAKE_RETRIES] times in a row;
+     * otherwise the link stays dead for good. One job per handshake, so the transport goes idle once nothing is pending.
+     */
+    private fun expireLater(ep: PeerEndpoint, hs: Handshake) {
+        scope.launch {
+            kotlinx.coroutines.delay(handshakeTimeoutMs)
+            val retry = synchronized(lock) {
+                val k = key(ep)
+                if (pending[k] !== hs) return@synchronized null
+                pending.remove(k)
+                val n = (retries[k] ?: 0) + 1
+                if (n > MAX_HANDSHAKE_RETRIES || k in byEndpoint) { retries.remove(k); return@synchronized null }
+                retries[k] = n
+                innerConnected.firstOrNull { key(it) == k }
+            } ?: return@launch
+            SLog.d(TAG, "handshake with ${retry.displayName} timed out; starting again")
+            initiate(retry)
         }
     }
 
@@ -528,6 +537,7 @@ class SecureTransport(
         hs.ee = ee
         hs.kFin = k.copyOfRange(32, 64)
         synchronized(lock) { pending[key(ep)] = hs }
+        expireLater(ep, hs)
         inner.send(ep, resp).onFailure { SLog.w(TAG, "SESSION_RESP to ${ep.displayName} not sent: ${it.message}") }
     }
 
@@ -654,6 +664,7 @@ class SecureTransport(
         val ws: List<CompletableDeferred<Session>>
         synchronized(lock) {
             old = byEndpoint.put(key(s.endpoint), s)
+            retries.remove(key(s.endpoint))
             ws = waiters.remove(key(s.endpoint)).orEmpty()
         }
         if (old != null && old !== s) retire(old)
@@ -762,6 +773,7 @@ class SecureTransport(
         const val LINK_MEASURE_INTERVAL_MS = 5 * 60_000L
         /** How long [open] waits for a handshake. */
         const val HANDSHAKE_TIMEOUT_MS = 15_000L
+        const val MAX_HANDSHAKE_RETRIES = 3
         private const val MAX_KBPS = 1_000_000
         private const val MAX_KEY = 512
         private const val MAX_PAYLOAD = 2048

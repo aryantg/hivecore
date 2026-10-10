@@ -1,6 +1,6 @@
 # On-phone gates (spec section 19)
 
-Everything below is reserved for the user. The JVM suite (901 tests, `tools/gradle.sh testDebugUnitTest`) covers the
+Everything below is reserved for the user. The JVM suite (976 tests, `tools/gradle.sh testDebugUnitTest`) covers the
 logic; these gates need real iQOO 15 phones, a relay host, or an OpenRouter account. Build a gate APK with
 `tools/gradle.sh :app:assembleDebug -PhiveFeatures=<flags>`; a flag defaults on only after its gate passed.
 
@@ -40,4 +40,22 @@ What the phones taught (each fixed in the code):
   holds the redial for 30 s, and a join drops the half-open links and dials the inviter afresh before its handshake.
 - **Roster members are pinned from the roster.** Two phones that each paired with the admin refused each other as "not paired": the session layer only knew keys pinned at pairing. The router now pins every member of an accepted roster (and of the stored roster at start-up), so the admin-signed roster is the membership, as 6.4 says.
 - **Thermal.** The phone loading the NPU model while charging reached "critical" (45 °C) within minutes; the worker
-  policy keeps such a phone ineligible as designed, but the orchestrator role is unaffected.
+  policy keeps such a phone ineligible as designed, but the orchestrator role is unaffected. The Swarm tiles show the
+  battery sensor, which reads 31 to 39 °C while the skin sensor that sets the thermal status reads 42 to 43 °C
+  (status 2, ineligible), so a tile can say "Cool" next to "the phone is hot".
+- **Crossed handshakes.** Two phones dialling each other at once each started a handshake over the other's, the FIN
+  found no responder and both stayed pending for good. A phone already answering the peer's INIT no longer starts its
+  own, and a handshake that does not complete within the timeout is dropped and started again while the link lives (at
+  most three times in a row; one timer per handshake, because an endless sweep loop never lets the JVM tests go idle).
+- **Own chunks and BENCH.** The orchestrator's own chunks carry no PLAN and are no longer put through P10; the "Benchmark
+  every model" recipe gets the installed models as items and a 60 s per-unit estimate, so its chunks keep their
+  deadlines. It then ran across the swarm (10 chunks, done, ledger written), and a re-run was served from the chunk memo
+  on the three phones.
+- **Files never reached a job.** The Jobs screen's "Choose files" was never wired in the app, so no file or image recipe
+  could start on a phone. It now opens the system document picker for the recipe's item kinds and copies the picks into
+  the app's cache.
+- **Chained stages over raw files.** A file recipe ran every stage on the picked files, including stages that read an
+  earlier stage's output (LAYOUT over photos); those stages are now skipped and listed, as for item recipes.
+- **OCR read one photo per chunk.** A shard chunk carries several photos, but OCR read only the first, so a split OCR
+  job lost most of its pages. OCR now returns one item per photo (`{"items":[{"item","lines"}]}`) and the concat merge
+  keeps all of them. The new "Photo text (OCR)" recipe (`photo_text`) is the gate 4 job: one OCR stage over picked images.
