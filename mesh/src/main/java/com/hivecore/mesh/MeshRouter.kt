@@ -35,6 +35,15 @@ interface Disconnectable { fun disconnect(endpoint: PeerEndpoint) }
  * `from`), applies the replay guard to JOBs, enforces the CONSENT_RES and PLAN_CONSENT_RES approval-signature rules, and exposes the
  * result as [verified]. Unknown senders are dropped and logged unless pairing mode is on.
  *
+ * Sessions (spec 6.3): every transport handed in is wrapped in a [SecureTransport] (one handed in already secured is
+ * used as is), so envelopes leave and arrive only inside an authenticated AES-GCM session; a handshake with an
+ * unpinned peer is refused there, and an authentication failure drops that link and is reported through
+ * [onAuthFailure] / [authFailures] with the peer's name.
+ *
+ * Roster (spec 6.4): with a [RosterStore], ROSTER and REVOKE are applied (highest validly signed version wins) and
+ * gossiped on; a newly revoked peer's key is deleted, its session closed and its messages dropped; HELLO carries this
+ * phone's roster version and a peer behind it is sent the roster.
+ *
  * Pairing: a transport with its own digits (Nearby) raises [Transport.pairingRequests]; those pass through to
  * [pairing] and [accept] forwards the decision to the transport, remembering the endpoint so its first HELLO pins.
  * A transport without digits (RFCOMM) gets its request from this router on the first unpinned HELLO received while
@@ -48,9 +57,11 @@ interface Disconnectable { fun disconnect(endpoint: PeerEndpoint) }
  * @param bondedProvider        Settings-bonded phones for [bonded] (the Bluetooth transport agent supplies it)
  * @param connectBondedHandler  receives [connectBonded] (the Bluetooth transport agent supplies it)
  * @param debugAllowNodeSignedApprovals  `signedBy:"node"` approvals are accepted only when true (BuildConfig.DEBUG)
+ * @param rosterStore           the admin-signed roster (spec 6.4); null = rosters are delivered unverified to [verified]
+ * @param onAuthFailure         (peer name, reason) once per failure (deduplicated per minute) for the warning the UI shows
  */
 class MeshRouter(
-    private val transports: Map<String, Transport>,
+    transports: Map<String, Transport>,
     private val signer: Signer,
     private val peerStore: PeerStore,
     private val localHello: () -> HelloBody,
@@ -61,10 +72,22 @@ class MeshRouter(
     private val debugAllowNodeSignedApprovals: Boolean = false,
     private val now: () -> Long = { System.currentTimeMillis() },
     private val pairingWindowMs: Long = 120_000L,
-    replayGuard: ReplayGuard? = null
+    replayGuard: ReplayGuard? = null,
+    private val rosterStore: RosterStore? = null,
+    onAuthFailure: (peerName: String, reason: String) -> Unit = { _, _ -> },
 ) : PeerManager {
 
     val nodeId: String = Wire.nodeIdOf(signer.publicKeyB64) ?: error("signer public key is not base64")
+
+    /** Spec 6.3: every transport runs below a session layer. */
+    private val transports: Map<String, SecureTransport> = transports.mapValues { (_, t) ->
+        t as? SecureTransport ?: SecureTransport(t, signer, pinnedKeyOf = { peerStore.get(it)?.pubkey }, clock = now, scope = scope)
+    }
+    var onAuthFailure: (peerName: String, reason: String) -> Unit = onAuthFailure
+    private val authFailuresFlow = MutableSharedFlow<AuthFailure>(replay = 0, extraBufferCapacity = 64)
+    /** Every session authentication failure, with `peer` = the peer's name (pinned name, HELLO name or nodeId prefix). */
+    val authFailures: SharedFlow<AuthFailure> = authFailuresFlow
+    private val reportedFailures = HashMap<String, Long>()
 
     private val verifiedFlow = MutableSharedFlow<Verified>(replay = 0, extraBufferCapacity = 256)
     /** Every inbound message that passed verification. Subscribe before [start]; nothing is replayed. */
@@ -100,7 +123,7 @@ class MeshRouter(
     private val lock = Any()
 
     // ---- state guarded by `lock` ----
-    private var active: Transport? = null
+    private var active: SecureTransport? = null
     private val collectors = ArrayList<Job>()
     private var pairingMode = false
     private var pairingTimer: Job? = null
@@ -116,6 +139,48 @@ class MeshRouter(
     private class PendingHello(val hello: HelloBody, val endpoint: PeerEndpoint, val digits: String)
 
     private fun key(e: PeerEndpoint) = "${e.transport}/${e.endpointId}"
+
+    init {
+        for (st in this.transports.values) {
+            st.admitEndpoint = { ep -> synchronized(lock) { key(ep) in acceptedEndpoints } }
+            val inner = st.onAuthFailure
+            st.onAuthFailure = { peer, reason -> inner(peer, reason); reportAuthFailure(peer, reason) }
+        }
+    }
+
+    /** The session layer of transport [name] (default: the selected one); pairing and the roster admin talk to it. */
+    fun secure(name: String = transportState.value): SecureTransport? = transports[name]
+
+    /** Every transport's session layer (pairing installs its admission rule on each). */
+    fun secureTransports(): Collection<SecureTransport> = transports.values
+
+    /** Registers [l] on every transport's session layer (pairing listens for CONTROL frames). */
+    fun addSessionListener(l: SessionListener) = transports.values.forEach { it.addListener(l) }
+
+    /** Re-evaluates every session against the pins (after a pin or forget made outside this router) and retries refused links. */
+    fun refreshSessions() = synchronized(lock) { active }?.refresh()
+
+    /** This phone's roster version for HELLO and the Swarm screen (null = no roster yet). */
+    fun rosterVersion(): Long? = rosterStore?.latest()?.version
+
+    private fun reportAuthFailure(peer: String, reason: String) {
+        val name = when {
+            peer.startsWith("endpoint:") -> peer.substringAfter("endpoint:")
+            else -> peerStore.get(peer)?.name
+                ?: synchronized(lock) { lastHello[peer]?.name ?: pendingPairing.values.firstOrNull { it.hello.nodeId == peer }?.hello?.name }
+                ?: peer.take(8)
+        }
+        val k = "$name|$reason"
+        val t = now()
+        val fresh = synchronized(reportedFailures) {
+            val last = reportedFailures[k]
+            if (last != null && t - last < AUTH_FAILURE_REPEAT_MS) false else { reportedFailures[k] = t; true }
+        }
+        if (!fresh) return
+        SLog.w(TAG, "authentication failure with $name: $reason")
+        authFailuresFlow.tryEmit(AuthFailure(name, PeerEndpoint("", "", name), reason))
+        runCatching { onAuthFailure(name, reason) }
+    }
 
     // ------------------------------------------------------------------ lifecycle
 
@@ -215,6 +280,7 @@ class MeshRouter(
         removePending(k)
         if (ok) synchronized(lock) { acceptedEndpoints.add(k) }
         t?.acceptPairing(req, ok)
+        if (ok) t?.retry(req.endpoint)   // the link may already exist with a refused handshake
         SLog.d(TAG, "transport pairing ${if (ok) "accepted" else "declined"} for ${req.endpoint.displayName}")
     }
 
@@ -224,6 +290,7 @@ class MeshRouter(
             lastHello.remove(nodeId)
             endpointOfNode.remove(nodeId)
         }
+        synchronized(lock) { active }?.let { it.close(nodeId, "forgotten"); it.refresh() }
         SLog.d(TAG, "forgot ${nodeId.take(8)}")
         refreshPeers()
     }
@@ -285,7 +352,8 @@ class MeshRouter(
 
     private suspend fun sendHello(ep: PeerEndpoint) {
         val t = synchronized(lock) { active } ?: return
-        val body = localHello().copy(nodeId = nodeId, pubkey = signer.publicKeyB64, ts = now())
+        val local = localHello()
+        val body = local.copy(nodeId = nodeId, pubkey = signer.publicKeyB64, ts = now(), rosterVersion = local.rosterVersion ?: rosterVersion())
         synchronized(lock) { greeted.add(key(ep)) }
         val r = t.send(ep, Wire.encode(MsgType.HELLO, nodeId, MeshJson.encode(body), signer))
         if (r.isFailure) {
@@ -296,7 +364,7 @@ class MeshRouter(
 
     // ------------------------------------------------------------------ transport events
 
-    private suspend fun onConnected(t: Transport, list: List<PeerEndpoint>) {
+    private suspend fun onConnected(t: SecureTransport, list: List<PeerEndpoint>) {
         val fresh = ArrayList<PeerEndpoint>()
         synchronized(lock) {
             val keys = list.map { key(it) }.toSet()
@@ -305,11 +373,16 @@ class MeshRouter(
                 if (k !in connectedEndpoints && k !in greeted) fresh += ep
                 connectedEndpoints[k] = ep
             }
+            // [list] is the endpoints with an exposed session; pairing state is per link and survives a refused
+            // handshake on a link the carrier still has (the owner's acceptance on one side comes before the other's).
             val gone = connectedEndpoints.keys.filter { it !in keys }
-            gone.forEach { removePending(it) }
+            val linkGone = gone.filter { k -> connectedEndpoints[k]?.let { t.hasLink(it) } != true }
+            linkGone.forEach { removePending(it) }
             for (k in gone) {
                 connectedEndpoints.remove(k)
                 greeted.remove(k)
+            }
+            for (k in linkGone) {
                 pendingPairing.remove(k)
                 acceptedEndpoints.remove(k)
             }
@@ -346,6 +419,11 @@ class MeshRouter(
         val peer = peerStore.get(env.from)
         if (peer == null) {
             SLog.w(TAG, "dropped $type from unknown signer ${env.from.take(8)} via ${inb.endpoint.displayName}")
+            return
+        }
+        if (rosterStore?.isRevoked(env.from) == true) {
+            SLog.w(TAG, "dropped $type from revoked ${peer.name}; forgetting its key")
+            forget(env.from)
             return
         }
         if (!Wire.verify(env, peer.pubkey)) {
@@ -463,9 +541,21 @@ class MeshRouter(
                 // ---- v2 plan §12.1 sender rules ----
                 // Handshake frames are consumed by the session layer below the router; one that gets here is a bug or an attack.
                 MsgType.SESSION_INIT, MsgType.SESSION_RESP, MsgType.SESSION_FIN -> return drop(type, peer, "handshake frame reached the router")
-                // Gossiped by any member; the roster store verifies adminSig and keeps the highest version (§4.4).
-                MsgType.ROSTER -> MeshJson.decode<RosterBody>(env.body)
-                MsgType.REVOKE -> MeshJson.decode<RevokeBody>(env.body)
+                // Gossiped by any member; the roster store verifies adminSig and keeps the highest version (spec 6.4).
+                MsgType.ROSTER -> {
+                    val b = MeshJson.decode<RosterBody>(env.body)
+                    val rs = rosterStore ?: return true
+                    val before = rs.current(b.groupId)
+                    if (!rs.apply(b)) return drop(type, peer, "roster v${b.version} is not newer or its adminSig does not verify")
+                    afterRosterChange(b.groupId, before, env.from, type, env.body)
+                }
+                MsgType.REVOKE -> {
+                    val b = MeshJson.decode<RevokeBody>(env.body)
+                    val rs = rosterStore ?: return true
+                    val before = rs.current(b.groupId)
+                    if (!rs.applyRevoke(b)) return drop(type, peer, "revoke v${b.version} is not newer or its adminSig does not verify")
+                    afterRosterChange(b.groupId, before, env.from, type, env.body)
+                }
                 MsgType.SIGNAL -> if (MeshJson.decode<SignalBody>(env.body).from != env.from) return drop(type, peer, "signal.from != from")
                 MsgType.MODEL_REQ -> {
                     val b = MeshJson.decode<ModelReqBody>(env.body)
@@ -491,6 +581,34 @@ class MeshRouter(
     private fun drop(type: MsgType, peer: PinnedPeer, why: String): Boolean {
         SLog.w(TAG, "dropped $type from ${peer.name}: $why")
         return false
+    }
+
+    /**
+     * After a ROSTER or REVOKE applied: every newly revoked peer loses its pinned key and its session (spec 6.4), and
+     * the signed body is gossiped to every other connected member (a member that already holds it drops it as not
+     * newer, so the gossip terminates).
+     */
+    private fun afterRosterChange(groupId: String, before: RosterBody?, from: String, type: MsgType, body: String) {
+        val after = rosterStore?.current(groupId) ?: return
+        val newlyRevoked = after.revoked.filter { it !in before?.revoked.orEmpty() }
+        for (id in newlyRevoked) {
+            if (id == nodeId) { SLog.w(TAG, "this phone was revoked from $groupId v${after.version}"); continue }
+            if (peerStore.isPinned(id)) { SLog.w(TAG, "revoked ${peerStore.get(id)?.name ?: id.take(8)}: key deleted"); forget(id) }
+        }
+        scope.launch {
+            val t = synchronized(lock) { active } ?: return@launch
+            val bytes = Wire.encode(type, nodeId, body, signer)
+            for ((id, ep) in connectedNodes()) if (id != from) t.send(ep, bytes)
+        }
+    }
+
+    /** Sends the signed roster and the revokes after it to a peer whose HELLO carried an older version. */
+    private suspend fun sendRoster(to: PeerEndpoint, latest: RosterBody) {
+        val rs = rosterStore ?: return
+        val t = synchronized(lock) { active } ?: return
+        val base = rs.signedRoster(latest.groupId) ?: return
+        t.send(to, Wire.encode(MsgType.ROSTER, nodeId, MeshJson.encode(base), signer))
+        for (r in rs.revokesAfter(latest.groupId, base.version)) t.send(to, Wire.encode(MsgType.REVOKE, nodeId, MeshJson.encode(r), signer))
     }
 
     private suspend fun onHello(env: Envelope, ep: PeerEndpoint) {
@@ -522,6 +640,7 @@ class MeshRouter(
             remember(env.from, hello, ep)
             SLog.d(TAG, "HELLO from ${hello.name} (${env.from.take(8)}) via ${ep.displayName}; caps=${hello.caps}")
             if (synchronized(lock) { k !in greeted }) sendHello(ep)
+            rosterStore?.latest()?.let { mine -> if ((hello.rosterVersion ?: -1L) < mine.version) sendRoster(ep, mine) }
             verifiedFlow.emit(Verified(MsgType.HELLO, env.from, env.body))
             refreshPeers()
             return
@@ -579,7 +698,9 @@ class MeshRouter(
     private fun pin(hello: HelloBody, ep: PeerEndpoint) {
         peerStore.pin(hello.nodeId, hello.name, hello.pubkey, hello.approvalPubkey, hello.holds, now(), ep.transport, ep.endpointId)
         remember(hello.nodeId, hello, ep)
+        synchronized(lock) { acceptedEndpoints.remove(key(ep)) }
         SLog.d(TAG, "pinned ${hello.name} (${hello.nodeId.take(8)}) via ${ep.transport}")
+        synchronized(lock) { active }?.refresh()
     }
 
     private fun remember(nodeId: String, hello: HelloBody, ep: PeerEndpoint) = synchronized(lock) {
@@ -609,5 +730,7 @@ class MeshRouter(
         const val MAX_ENVELOPE = 64 * 1024
         /** The replay guard's window: a clock further off than this makes a peer's JOBs fail. */
         const val CLOCK_WINDOW_MS = 10 * 60_000L
+        /** The same (peer, reason) authentication failure is reported once per this interval. */
+        const val AUTH_FAILURE_REPEAT_MS = 60_000L
     }
 }
