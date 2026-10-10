@@ -55,6 +55,18 @@ const (
 	TDrop       = "drop"
 	TPing       = "ping"
 	TPong       = "pong"
+	// Invite frames (spec 6.2, remote pairing): a member opens an invite by its token hash; a joiner that presents the
+	// token authenticates as a guest who may exchange msg frames with the inviter only, until the invite expires.
+	TInvite     = "invite"
+	TInviteOK   = "invite_ok"
+	TInviteFail = "invite_fail"
+)
+
+// Guest (invite) limits: an invite lives 10 minutes (spec 20.2, pairing token) and a guest socket is throttled hard.
+const (
+	InviteTTL            = 10 * time.Minute
+	GuestRateMsgsPerSec  = 10
+	GuestRateBytesPerSec = 256 * 1024
 )
 
 // Drop and failure reasons.
@@ -75,7 +87,20 @@ const (
 	ReasonNotAllowed      = "admin_not_allowed"
 	ReasonReplaced        = "replaced"
 	ReasonRemovedByRoster = "removed_by_roster"
+	ReasonBadInvite       = "bad_invite"
+	ReasonNoPushToken     = "no_push_token"
+	ReasonGuestOnly       = "guest_only"
+	ReasonIdle            = "idle"
 )
+
+// AuthBytes is what the node key signs to answer a challenge: the domain, a zero byte and the raw 32-byte nonce.
+// The leading domain means the signed bytes can never be a JSON envelope body (which starts with `{`).
+func AuthBytes(nonce []byte) []byte {
+	b := make([]byte, 0, len(AuthDomain)+1+len(nonce))
+	b = append(b, AuthDomain...)
+	b = append(b, 0)
+	return append(b, nonce...)
+}
 
 // Member is one roster member as reported in auth_ok.
 type Member struct {
@@ -94,7 +119,8 @@ type TurnCreds struct {
 // Frame is every relayd frame, flattened; `type` selects which fields are meaningful (plan §13.6):
 //
 //	challenge  relay→client  {nonce, serverTs}
-//	auth       client→relay  {nodeId, groupId, rosterVersion, sig, pushToken?}
+//	auth       client→relay  {nodeId, groupId, rosterVersion, sig, pushToken?, invite?, pubkey?, inviter?}
+//	                         invite + pubkey + inviter: guest auth of a joiner that is not on the roster yet
 //	auth_ok    relay→client  {serverTs, members:[{nodeId, online}], turn?, version}
 //	auth_fail  relay→client  {reason}
 //	roster     client→relay  {roster, adminSig, sig?}          sig only for a group the relay does not know yet
@@ -105,6 +131,8 @@ type TurnCreds struct {
 //	wake       client→relay  {nodeId}
 //	drop       relay→client  {to, reason, id?}
 //	ping/pong  both          {ts, serverTs?}
+//	invite     client→relay  {tokenHash, ttlS?}                 sha256 hex of the invite token
+//	invite_ok / invite_fail  relay→client {tokenHash} / {reason}
 type Frame struct {
 	Type string `json:"type"`
 
@@ -117,6 +145,10 @@ type Frame struct {
 	RosterVersion int64  `json:"rosterVersion,omitempty"`
 	Sig           string `json:"sig,omitempty"`
 	PushToken     string `json:"pushToken,omitempty"`
+	Invite        string `json:"invite,omitempty"`
+	Pubkey        string `json:"pubkey,omitempty"`
+	Inviter       string `json:"inviter,omitempty"`
+	TokenHash     string `json:"tokenHash,omitempty"`
 
 	Members []Member   `json:"members,omitempty"`
 	Turn    *TurnCreds `json:"turn,omitempty"`
@@ -124,7 +156,7 @@ type Frame struct {
 
 	Reason string `json:"reason,omitempty"`
 
-	Roster   []byte `json:"-"`
+	Roster   []byte  `json:"-"`
 	RosterJS rawJSON `json:"roster,omitempty"`
 	AdminSig string  `json:"adminSig,omitempty"`
 
