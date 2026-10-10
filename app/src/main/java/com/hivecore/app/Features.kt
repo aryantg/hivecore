@@ -42,15 +42,15 @@ object Features {
     }
 
     /** Real screens per flag over [graph]'s view models; a screen without its phase keeps the placeholder. */
-    fun screens(graph: HiveCoreGraph): Map<Screen, @Composable () -> Unit> {
-        val on = screensFor(enabled())
+    fun screens(graph: HiveCoreGraph, flags: Collection<String> = enabled()): Map<Screen, @Composable () -> Unit> {
+        val on = screensFor(flags)
         val all: Map<Screen, @Composable () -> Unit> = mapOf(
             Screen.ASK to { AskRoute(graph.ask) },
             Screen.JOBS to { JobsRoute(graph.jobs) },
             Screen.SWARM to { SwarmRoute(graph.swarm) },
             Screen.MODELS to { ModelsRoute(graph.models) },
             Screen.DATA to { DataRoute(graph.data) },
-            Screen.SETTINGS to { SettingsRoute(graph.settings, cloud = cloud) },
+            Screen.SETTINGS to { SettingsRoute(graph.settings, cloud = "cloud" in flags) },
         )
         return all.filterKeys { it in on }
     }

@@ -104,6 +104,9 @@ class ProfileBeacon(
         put(if (link != null) p.copy(link = link) else p)
     }
 
+    /** A peer the relay reports offline (spec 5.5): its profile leaves the snapshot at once instead of after the stale window. */
+    fun forget(nodeId: String) { synchronized(lock) { latest.remove(nodeId) } }
+
     /** Records [p] as received now; an older `ts` than the one held is ignored. */
     fun put(p: Profile) = synchronized(lock) {
         val prev = latest[p.nodeId]

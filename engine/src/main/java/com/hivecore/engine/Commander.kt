@@ -16,6 +16,7 @@ import com.hivecore.core.OpClass
 import com.hivecore.core.OpClasses
 import com.hivecore.core.PlanCompiler
 import com.hivecore.core.PlanSummary
+import com.hivecore.core.PlannedQuestion
 import com.hivecore.core.Planner
 import com.hivecore.core.Profile
 import com.hivecore.core.Provenance
@@ -137,12 +138,15 @@ class Commander(
 
     // ------------------------------------------------------------------ ask
 
-    /** Runs one composite question end to end; the last emission is [AskProgress.Done]. */
-    fun askComposite(question: String, route: RouteDecision, catalogs: List<Catalog>): Flow<AskProgress> = channelFlow {
+    /**
+     * Runs one composite question end to end; the last emission is [AskProgress.Done]. [planned] is a plan the tiered
+     * planner (spec 7.2) already produced for [question]; null plans it here with the T1 [planner].
+     */
+    fun askComposite(question: String, route: RouteDecision, catalogs: List<Catalog>, planned: PlannedQuestion? = null): Flow<AskProgress> = channelFlow {
         val t0 = clock()
         fun timing() = Timing(totalMs = clock() - t0)
         send(AskProgress.Status("Planning…"))
-        val planned = planner.plan(question, route, catalogs).getOrElse { e ->
+        val planned = planned ?: planner.plan(question, route, catalogs).getOrElse { e ->
             send(AskProgress.Done(AskOutcome.Refusal(listOf(selfName to (e.message ?: "this question cannot be planned")), timing())))
             return@channelFlow
         }

@@ -1,6 +1,7 @@
 package com.hivecore.ui.ports
 
 import com.hivecore.core.Profile
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 // Spec section 17 (Swarm) and section 6 (pairing, roster): what the Swarm screen needs beyond `core.WorkerPolicy`
@@ -34,6 +35,8 @@ interface SwarmPort {
     val pendingJoins: StateFlow<List<JoinRequestView>>
     /** Handshakes waiting for this phone's Confirm (as inviter or joiner), oldest first. */
     val sasPrompts: StateFlow<List<SasView>>
+    /** Warnings the mesh raised (a session authentication failure, unauthorised tasks), newest first; shown on the screen. */
+    val warnings: StateFlow<List<String>> get() = NO_WARNINGS
 
     /** Show QR / send invite link: a fresh invite token (10 minutes). */
     suspend fun createInvite(): Result<InviteView>
@@ -46,4 +49,6 @@ interface SwarmPort {
     suspend fun approve(nodeId: String): Result<Unit>
     suspend fun revoke(nodeId: String): Result<Unit>
     suspend fun handOver(nodeId: String): Result<Unit>
+
+    companion object { val NO_WARNINGS: StateFlow<List<String>> = MutableStateFlow(emptyList()) }
 }

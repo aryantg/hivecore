@@ -1,13 +1,19 @@
 package com.hivecore.app
 
 import android.content.Context
+import com.hivecore.core.DataAdmin
+import com.hivecore.core.JobRunner
 import com.hivecore.core.KeyValuePrefs
 import com.hivecore.core.LlmBackend
 import com.hivecore.core.MemoryPrefs
+import com.hivecore.core.ModelPool
+import com.hivecore.core.ModelRegistry
 import com.hivecore.core.NodeRole
 import com.hivecore.core.Profile
 import com.hivecore.core.SLog
+import com.hivecore.core.SchemaSource
 import com.hivecore.core.SharedPrefsKv
+import com.hivecore.core.WorkerPolicy
 import com.hivecore.core.fakes.FakeDataAdmin
 import com.hivecore.core.fakes.FakeJobRunner
 import com.hivecore.core.fakes.FakeModelPool
@@ -15,8 +21,12 @@ import com.hivecore.core.fakes.FakeModelRegistry
 import com.hivecore.core.fakes.FakeSchemaSource
 import com.hivecore.core.fakes.FakeWorkerPolicy
 import com.hivecore.engine.workload.RecipeDef
-import com.hivecore.engine.workload.Recipes
+import com.hivecore.ui.ports.AskPort
+import com.hivecore.ui.ports.DataPort
 import com.hivecore.ui.ports.MemberView
+import com.hivecore.ui.ports.ModelsPort
+import com.hivecore.ui.ports.SettingsPort
+import com.hivecore.ui.ports.SwarmPort
 import com.hivecore.ui.ports.fakes.FakeAskPort
 import com.hivecore.ui.ports.fakes.FakeDataPort
 import com.hivecore.ui.ports.fakes.FakeModelsPort
@@ -33,31 +43,50 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
 /**
- * The app's object graph for the six screens (spec section 17): one view model per screen, built over the port
- * fakes so the app always runs. The integration wave swaps each fake for the real seam (`SwarmGraph`'s JobRunner,
- * the trust track's SwarmPort, the runtime track's ModelsPort, the state track's DataPort, the cloud track's
- * SettingsPort) without touching the screens. Nothing here starts the engine.
+ * The app's object graph for the six screens (spec section 17): one view model per screen over the [Ports]. On a
+ * phone [AppWiring] builds the ports behind the feature flags (a phase that is off keeps its `:ui` fake, so the app
+ * always runs); [inMemory] builds the same shape over the fakes for the JVM.
  */
 class HiveCoreGraph(
     val prefs: KeyValuePrefs,
-    private val loadRecipes: () -> List<RecipeDef>,
+    val ports: Ports,
     val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
 ) {
-    val selfId = "self"
-    val askPort = FakeAskPort()
-    val jobRunner = FakeJobRunner()
-    val swarmPort = FakeSwarmPort.sample()
-    val workerPolicy = FakeWorkerPolicy(Profile(selfId, System.currentTimeMillis(), LlmBackend.NPU, 17.0, idle = false, batteryPct = 80, batteryTempC = 30f, thermal = 0, big = "none"))
-    val modelsPort = FakeModelsPort.sample()
-    val modelRegistry = FakeModelRegistry()
-    val modelPool = FakeModelPool(modelRegistry)
-    val schema = FakeSchemaSource(NodeRole.SALES)
-    val dataAdmin = FakeDataAdmin()
-    val dataPort = FakeDataPort()
-    val settingsPort = FakeSettingsPort(listOf(MemberView("sales", "Sales"), MemberView("accounts", "Accounts")))
+    /** Everything the screens code against, real or fake per flag. */
+    class Ports(
+        val selfId: String,
+        val askPort: AskPort,
+        val jobRunner: JobRunner,
+        val swarmPort: SwarmPort,
+        val workerPolicy: WorkerPolicy?,
+        val modelsPort: ModelsPort,
+        val modelRegistry: ModelRegistry,
+        val modelPool: ModelPool,
+        val schema: SchemaSource,
+        val dataAdmin: DataAdmin,
+        val dataPort: DataPort,
+        val settingsPort: SettingsPort,
+        /** the cloud consent sheet's state (cloud flag), for the activity to host */
+        val consent: CloudConsent? = null,
+        val loadRecipes: () -> List<RecipeDef> = { emptyList() },
+    )
+
+    val selfId: String get() = ports.selfId
+    val askPort: AskPort get() = ports.askPort
+    val jobRunner: JobRunner get() = ports.jobRunner
+    val swarmPort: SwarmPort get() = ports.swarmPort
+    val workerPolicy: WorkerPolicy? get() = ports.workerPolicy
+    val modelsPort: ModelsPort get() = ports.modelsPort
+    val modelRegistry: ModelRegistry get() = ports.modelRegistry
+    val modelPool: ModelPool get() = ports.modelPool
+    val schema: SchemaSource get() = ports.schema
+    val dataAdmin: DataAdmin get() = ports.dataAdmin
+    val dataPort: DataPort get() = ports.dataPort
+    val settingsPort: SettingsPort get() = ports.settingsPort
+    val consent: CloudConsent? get() = ports.consent
 
     val ask: AskViewModel by lazy { AskViewModel(askPort, prefs, scope) }
-    val jobs: JobsViewModel by lazy { JobsViewModel(jobRunner, swarmPort.peers, loadRecipes, scope) }
+    val jobs: JobsViewModel by lazy { JobsViewModel(jobRunner, swarmPort.peers, ports.loadRecipes, scope, resultHash = { p -> p.resultRef?.removePrefix("split:") }) }
     val swarm: SwarmViewModel by lazy { SwarmViewModel(swarmPort, workerPolicy, scope) }
     val models: ModelsViewModel by lazy { ModelsViewModel(modelsPort, modelRegistry, modelPool, selfId, scope) }
     val data: DataViewModel by lazy { DataViewModel(schema, dataAdmin, dataPort, scope) }
@@ -73,11 +102,28 @@ class HiveCoreGraph(
 
         private fun build(context: Context): HiveCoreGraph {
             val app = context.applicationContext
-            SLog.d("Graph", "building the UI graph over the port fakes")
-            return HiveCoreGraph(SharedPrefsKv(app), { Recipes.fromAssets(app.assets::list) { app.assets.open(it) } })
+            val prefs = SharedPrefsKv(app)
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            SLog.d("Graph", "building the graph; features: ${Features.enabled().ifEmpty { listOf("none") }}")
+            val ports = try { AppWiring.build(app, prefs, scope) } catch (e: Exception) {
+                SLog.e("Graph", "wiring failed; the screens run over the fakes", e)
+                fakePorts(Features.enabled())
+            }
+            return HiveCoreGraph(prefs, ports, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
         }
 
-        /** JVM tests and previews: in-memory prefs, no assets. */
-        fun inMemory(scope: CoroutineScope): HiveCoreGraph = HiveCoreGraph(MemoryPrefs(), { emptyList() }, scope)
+        /** The fake ports, the shape every flag set keeps on the JVM (and the phone's fallback when wiring fails). */
+        fun fakePorts(flags: Collection<String> = emptyList()): Ports {
+            val selfId = "self"
+            val registry = FakeModelRegistry()
+            return Ports(selfId, FakeAskPort(), FakeJobRunner(), FakeSwarmPort.sample(),
+                FakeWorkerPolicy(Profile(selfId, System.currentTimeMillis(), LlmBackend.NPU, 17.0, idle = false, batteryPct = 80, batteryTempC = 30f, thermal = 0, big = "none")),
+                FakeModelsPort.sample(), registry, FakeModelPool(registry), FakeSchemaSource(NodeRole.SALES), FakeDataAdmin(), FakeDataPort(),
+                FakeSettingsPort(listOf(MemberView("sales", "Sales"), MemberView("accounts", "Accounts"))),
+                consent = if ("cloud" in flags) CloudConsent() else null)
+        }
+
+        /** JVM tests and previews: in-memory prefs, the fake ports for [flags], no assets. */
+        fun inMemory(scope: CoroutineScope, flags: Collection<String> = emptyList()): HiveCoreGraph = HiveCoreGraph(MemoryPrefs(), fakePorts(flags), scope)
     }
 }

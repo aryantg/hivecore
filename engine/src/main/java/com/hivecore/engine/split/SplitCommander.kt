@@ -89,6 +89,11 @@ class SplitCommander(
     private val allowMobileData: () -> Boolean = { false },
     /** a (node, capability) cooldown started by a TASK_RESULT of class oom / model_load / thermal or a MODEL_FAIL */
     private val onCooldown: (nodeId: String, capability: String, untilTs: Long) -> Unit = { _, _, _ -> },
+    /**
+     * Section 5.5 / 14 "node asleep": called before a TASK to a WAN phone (`RelayPresence.ensureAwake`); false = the
+     * phone did not come back within the wake grace, so the attempt is faulted blamelessly and the phone paused.
+     */
+    private val ensureAwake: suspend (nodeId: String) -> Boolean = { true },
 ) {
     private sealed interface Event {
         data class Result(val node: String, val body: TaskResultBody) : Event
@@ -233,6 +238,13 @@ class SplitCommander(
                             q.removeNode(a.node, "unreachable"); return
                         }
                     }
+                }
+                if (remote && isWan(a.node) && !ensureAwake(a.node)) {
+                    journal.attempt(attemptRow(c, a.attempt, a.node, "error", cls = "asleep"))
+                    q.onFault(a.node, c.index, a.attempt, "asleep", WorkQueue.UNREACHABLE)
+                    q.pause(a.node, SplitConstants.WAN_WAKE_GRACE_MS)
+                    q.notes += "${a.node.take(8)} is asleep; ${SplitConstants.WAN_WAKE_GRACE_MS / 1000} s wake grace"
+                    return
                 }
                 if (remote) ensurePlanned(a.node)
                 val now = clock()

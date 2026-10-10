@@ -118,6 +118,17 @@ class SwarmNode(
     var resumeCoordinator: ResumeCoordinator? = null
     /** `JobRunner.resume`: the deputy pull, the journal snapshot and the RECLAIM round. */
     var jobResume: JobResume? = null
+    /**
+     * Spec 8.3: placement before a split job's queue opens. (job, planId) -> the phones that reported MODEL_READY for
+     * its capability once the queue may open (null = no placement for this job). Later READYs reach the live run
+     * through MODEL_READY on the same planId. Null hook = the profile view decides, as before placement existed.
+     */
+    var placeFor: (suspend (SplitJob, String) -> Set<String>?)? = null
+    /** The last emission of every split job this phone commanded (done, partial, error): the ledger's receipt exchange. */
+    var onSplitDone: (SplitProgress) -> Unit = { }
+    /** A chunk this phone ran for another commander: (TASK, commander, output, outputHash); the executor's `task` receipt. */
+    var onTaskRan: (TaskBody, String, JsonElement, String) -> Unit = { _, _, _, _ -> }
+    private val runSeq = java.util.concurrent.atomic.AtomicLong(0)
     /** Recipe lookup for [runWorkload] (id, version; version "" = the installed one). */
     var recipes: (String, String) -> Recipe? = { _, _ -> null }
     /** Recipe definitions with axis/merge/input (workload/Recipes); null = unknown id. */
@@ -204,10 +215,12 @@ class SwarmNode(
         } catch (e: Exception) {
             flow { emit(SplitProgress(jobId, request.op?.name ?: "", "", "", emptyList(), emptyList(), 0, 0, 0.0, 0.0, 0.0, 0, 0, 0, done = false, error = e.message ?: e.javaClass.simpleName)) }
         }
-        return raw.map { JobViews.of(it, request.title, nameOf) }.onEach { p ->
+        return raw.onEach { if (it.done || it.error != null) splitDone(it) }.map { JobViews.of(it, request.title, nameOf) }.onEach { p ->
             synchronized(jobList) { jobList.value = listOf(p) + jobList.value.filter { it.jobId != p.jobId } }
         }
     }
+
+    private fun splitDone(p: SplitProgress) { try { onSplitDone(p) } catch (e: Exception) { SLog.w(TAG, "onSplitDone: ${e.message}") } }
 
     override fun cancel(jobId: String) { split?.cancel(jobId) }
 
@@ -230,7 +243,7 @@ class SwarmNode(
         }.catch { e ->
             emit(SplitProgress(jobId, "", "", "", emptyList(), emptyList(), 0, 0, 0.0, 0.0, 0.0, 0, 0, 0, done = false, error = e.message ?: e.javaClass.simpleName))
         }
-        return raw.map { JobViews.of(it, "Resumed ${it.op.lowercase()}", nameOf) }.onEach { p ->
+        return raw.onEach { if (it.done || it.error != null) splitDone(it) }.map { JobViews.of(it, "Resumed ${it.op.lowercase()}", nameOf) }.onEach { p ->
             synchronized(jobList) { jobList.value = listOf(p) + jobList.value.filter { it.jobId != p.jobId } }
         }
     }
@@ -265,9 +278,9 @@ class SwarmNode(
 
     fun stop() { collector?.cancel(); collector = null; beacon?.stop(); reclaim?.stop(); resumeCoordinator?.stop() }
 
-    /** A composite (T2) question asked on this phone: this phone commands the plan. */
-    fun askComposite(question: String, route: RouteDecision, catalogs: List<Catalog>): Flow<AskProgress> =
-        commander.askComposite(question, route, catalogs)
+    /** A composite question asked on this phone: this phone commands the plan ([planned]: the tiered planner's plan, else T1 plans it). */
+    fun askComposite(question: String, route: RouteDecision, catalogs: List<Catalog>, planned: com.hivecore.core.PlannedQuestion? = null): Flow<AskProgress> =
+        commander.askComposite(question, route, catalogs, planned)
 
     /**
      * Splits one op over [input] across the swarm (§4B) with this phone as commander: chunk grid updates, then a last
@@ -277,9 +290,19 @@ class SwarmNode(
                jobId: String = java.util.UUID.randomUUID().toString()): Flow<SplitProgress> =
         runJob(SplitJob(jobId, op, params, modelId, input, owner = owner))
 
-    /** [ready] = the phones placement reported MODEL_READY for this job's capability (null: the profile view). */
-    fun runJob(job: SplitJob, useMemo: Boolean = true, ready: Set<String>? = null): Flow<SplitProgress> =
-        (split ?: throw IllegalStateException("this node has no split commander")).run(enforcePrivate(job), useMemo, ready)
+    /**
+     * [ready] = the phones placement reported MODEL_READY for this job's capability; null runs [placeFor] first (spec
+     * 8.3: the queue opens once one phone is ready) and, without a placement hook, the profile view decides.
+     */
+    fun runJob(job: SplitJob, useMemo: Boolean = true, ready: Set<String>? = null): Flow<SplitProgress> = flow {
+        val sc = split ?: throw IllegalStateException("this node has no split commander")
+        val j = enforcePrivate(job)
+        val place = placeFor
+        if (ready != null || place == null) { emitAll(sc.run(j, useMemo, ready)); return@flow }
+        val run = runSeq.incrementAndGet()
+        val placed = place(j, "${j.jobId}#$run")
+        emitAll(sc.run(j, useMemo, placed, planRun = run))
+    }
 
     /** A job over a table or document the owner marked private runs on this phone only (§7). */
     fun enforcePrivate(job: SplitJob): SplitJob {
@@ -411,8 +434,12 @@ class SwarmNode(
             val ms = (System.nanoTime() - t0) / 1_000_000
             r.fold(
                 onSuccess = { out ->
-                    reply(from, TaskResultBody(body.planId, body.task.id, selfId, out, Canon.hash(out), ms = ms))
-                    if (from != selfId) try { onWorkedForOthers(from, ms) } catch (e: Exception) { SLog.w(TAG, "contribution counter: ${e.message}") }
+                    val hash = Canon.hash(out)
+                    reply(from, TaskResultBody(body.planId, body.task.id, selfId, out, hash, ms = ms))
+                    if (from != selfId) {
+                        try { onWorkedForOthers(from, ms) } catch (e: Exception) { SLog.w(TAG, "contribution counter: ${e.message}") }
+                        try { onTaskRan(body, from, out, hash) } catch (e: Exception) { SLog.w(TAG, "task receipt: ${e.message}") }
+                    }
                 },
                 onFailure = { e ->
                     if (e.message == TaskRunnerImpl.YIELDED)
@@ -533,6 +560,7 @@ class SwarmNode(
             onCooldown: (String, String, Long) -> Unit = { _, _, _ -> },
             linkOf: (String) -> Link? = { null },
             journalPull: JournalPull? = null,
+            ensureAwake: suspend (String) -> Boolean = { true },
         ): SwarmNode {
             val selfId = router.nodeId
             lateinit var node: SwarmNode
@@ -555,7 +583,7 @@ class SwarmNode(
             node.split = SplitCommander(selfId, comparator, profiles = { beacon.snapshot() }, transmit = { to, t, b -> node.sendTo(to, t, b) },
                 sendBlobs = { to, ids, jobId -> sendBlobsFor(node, to, ids, jobId) }, clock = clock, selector = treeSelector, modelHash = modelHash,
                 journal = journal, memo = memo, escalator = escalator, schema = schemaValidator, readyFor = readyFor, unitMsOf = unitMsOf,
-                allowMobileData = allowMobileData, onCooldown = onCooldown)
+                allowMobileData = allowMobileData, onCooldown = onCooldown, ensureAwake = ensureAwake)
             node.journal = journal
             if (memo !== ChunkMemo.None) node.reclaim = ReclaimResponder(router, memo)
             if (journal !== JobJournal.None) {

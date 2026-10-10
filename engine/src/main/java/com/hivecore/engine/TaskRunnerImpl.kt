@@ -64,6 +64,9 @@ class TaskRunnerImpl(private val selfId: String) : TaskRunner {
     /** Drops every registered executor (the swarm node is being rebuilt, e.g. after a role change). */
     fun clearExecutors() { synchronized(lock) { executors.clear() } }
 
+    /** The registered executors' class names (spec 18.2: none may come from the cloud package). */
+    fun executorClassNames(): List<String> = synchronized(lock) { executors.map { it.javaClass.name } }
+
     /** The ops this runner can execute now. */
     fun ops(): Set<com.hivecore.core.Op> = synchronized(lock) { executors.flatMap { it.ops }.toSet() }
 

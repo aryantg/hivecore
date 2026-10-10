@@ -56,6 +56,12 @@ import com.hivecore.engine.pixels.ImageCodec
 import com.hivecore.node.vision.VisionExecutor
 import com.hivecore.node.vision.VlmAskExecutor
 import com.hivecore.engine.workload.RecipeDef
+import com.hivecore.engine.Escalator
+import com.hivecore.engine.journal.ChunkMemo
+import com.hivecore.engine.journal.JobJournal
+import com.hivecore.engine.journal.JournalPull
+import com.hivecore.core.Link
+import com.hivecore.core.TaskRunner
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -155,6 +161,21 @@ class SwarmGraph(
         val privateDocs: () -> Set<String> = { emptySet() },
         /** (commander, ms) after each task this phone ran for another phone */
         val onWorkedForOthers: (String, Long) -> Unit = { _, _ -> },
+        // ---- phases 7 and 8 (spec 13, 15): the state and cloud seams; defaults keep a node cloud-free and unjournaled ----
+        val journal: JobJournal = JobJournal.None,
+        val memo: ChunkMemo = ChunkMemo.None,
+        /** the orchestrator's gate; a node keeps Escalator.Off */
+        val escalator: Escalator = Escalator.Off,
+        val readyFor: (String) -> Set<String>? = { null },
+        val unitMsOf: (String, String) -> Double? = { _, _ -> null },
+        val allowMobileData: () -> Boolean = { false },
+        val onCooldown: (String, String, Long) -> Unit = { _, _, _ -> },
+        val linkOf: (String) -> Link? = { null },
+        val journalPull: JournalPull? = null,
+        /** wakes a WAN phone before its TASK (RelayPresence.ensureAwake); false faults the attempt blamelessly */
+        val ensureAwake: suspend (String) -> Boolean = { true },
+        /** wraps the task runner the node runs on (the memoizing runner of spec 13.2) */
+        val wrapRunner: (TaskRunnerImpl) -> TaskRunner = { it },
     )
 
     /** What executor factories get: the chooser and the node's own pieces. */
@@ -176,9 +197,12 @@ class SwarmGraph(
                 intentPlanner = d.intentPlanner, compiler = RuleIntentCompiler(), executor = SqlQueryExecutor(d.db) { AnswerChip.LLM }, planCompiler = PlanCompilerImpl(),
                 approval = d.approval, guard = d.guard ?: SqlDifferencingGuard(d.db, RuleIntentCompiler(), d.clock),
                 planner = planner, policy = policy, ledger = d.ledger, docIndex = d.docIndex, docAnswerer = d.docAnswerer,
-                blobDir = d.blobDir, runner = runner, extraExecutors = executors, nameOf = d.nameOf, modelHash = d.modelHash,
+                blobDir = d.blobDir, runner = d.wrapRunner(runner), extraExecutors = executors, nameOf = d.nameOf, modelHash = d.modelHash,
                 backend = d.backend, clock = d.clock,
                 decorateProfile = { p -> p.copy(dataVersion = d.dataVersion(), p50 = p.p50 + d.p50()) },
+                journal = d.journal, memo = d.memo, escalator = d.escalator, readyFor = d.readyFor, unitMsOf = d.unitMsOf,
+                allowMobileData = d.allowMobileData, onCooldown = d.onCooldown, linkOf = d.linkOf, journalPull = d.journalPull,
+                ensureAwake = d.ensureAwake,
             )
             node.recipeDefs = { id -> d.recipeDefs().firstOrNull { it.id == id } }
             node.recipes = { id, v -> d.recipeDefs().firstOrNull { it.id == id && (v.isEmpty() || it.version == v) }?.toRecipe() }
