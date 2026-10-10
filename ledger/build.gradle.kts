@@ -35,6 +35,8 @@ kotlin {
 dependencies {
     api(project(":core"))
     api(project(":mesh"))
+    // Spec §13.6: split-job entries are built from the journal's JobSnapshot (engine/journal).
+    api(project(":engine"))
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.sqlite.jdbc)

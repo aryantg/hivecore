@@ -46,6 +46,39 @@ class BlobStoreTest {
         assertTrue(worker.onChunk(chunks[2]).isFailure)
         assertFalse(worker.has(id))
         assertEquals(0, worker.pendingChunks(id))
+        assertEquals(1, worker.rejections(id))
+        assertEquals(mapOf(id to 1), worker.rejections())
+        // A clean re-send stores it; the rejection count stays as history.
+        val good = owner.chunks(id, "accounts", "job1")
+        good.dropLast(1).forEach { worker.onChunk(it) }
+        assertEquals(id, worker.onChunk(good.last()).getOrThrow())
+        assertTrue(worker.has(id))
+        assertEquals(1, worker.rejections(id))
+    }
+
+    @Test fun aBlobIsResentOnceThenThePhoneIsSkipped() {
+        val d = BlobDeliveries()
+        val b1 = Hashing.sha256Hex("one"); val b2 = Hashing.sha256Hex("two")
+        assertTrue(d.canSend("sales", b1)); assertFalse(d.holds("sales", b1))
+        d.sent("sales", b1)
+        assertEquals(1, d.sends("sales", b1))
+        // First corruption: re-send once.
+        assertTrue(d.failed("sales", b1))
+        assertTrue(d.canSend("sales", b1)); assertFalse(d.skips("sales", listOf(b1, b2)))
+        d.sent("sales", b1)
+        // Second corruption: that phone is skipped for every chunk that needs b1, but not for other blobs or phones.
+        assertFalse(d.failed("sales", b1))
+        assertFalse(d.canSend("sales", b1))
+        assertTrue(d.skips("sales", listOf(b2, b1))); assertFalse(d.skips("sales", listOf(b2)))
+        assertTrue(d.canSend("hr", b1)); assertFalse(d.skips("hr", listOf(b1)))
+        assertEquals(setOf(b1), d.skipped("sales")); assertEquals(emptySet<String>(), d.skipped("hr"))
+        assertEquals(2, d.sends("sales", b1)); assertEquals(2, d.failures("sales", b1))
+        // A delivered blob is not sent again; a later failure clears that.
+        d.sent("hr", b2); d.delivered("hr", b2)
+        assertTrue(d.holds("hr", b2))
+        assertTrue(d.failed("hr", b2)); assertFalse(d.holds("hr", b2))
+        d.forget("sales")
+        assertTrue(d.canSend("sales", b1)); assertEquals(0, d.sends("sales", b1))
     }
 
     @Test fun malformedChunksAreRejected() {
