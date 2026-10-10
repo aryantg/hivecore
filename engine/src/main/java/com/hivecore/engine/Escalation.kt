@@ -33,7 +33,40 @@ object Lineage {
     /** released by the owner for this job (§4A.1); may leave the device like public data */
     const val RELEASED = "released"
     const val PRIVATE = "private"
+    /** The `TaskSpec.params` key a plan node states its own input privacy under (planner `T2Params.PRIVACY`). */
+    const val PARAM = "privacy"
     fun strictest(a: String, b: String): String = if (a == PRIVATE || b == PRIVATE) PRIVATE else if (a == RELEASED || b == RELEASED) RELEASED else PUBLIC
+
+    /**
+     * Strictest lineage per task of a plan (spec 15.2 step 3), tasks in topological order: the node's own
+     * `params.privacy`, OWNER-class ops are private, blobs are released, and every input's lineage is inherited.
+     */
+    fun lineages(tasks: List<com.hivecore.core.TaskSpec>): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        for (t in tasks) {
+            var lin = when ((t.params[PARAM] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content) {
+                PRIVATE -> PRIVATE; RELEASED -> RELEASED; else -> PUBLIC
+            }
+            if (com.hivecore.core.OpRegistry[t.op].cls == com.hivecore.core.OpClass.OWNER) lin = PRIVATE
+            if (t.blobs.isNotEmpty()) lin = strictest(lin, RELEASED)
+            for (i in t.inputs) out[i]?.let { lin = strictest(lin, it) }
+            out[t.id] = lin
+        }
+        return out
+    }
+}
+
+/** Spec 15.1 / 20.2 verification thresholds: when a local result is not enough and the gate is asked. */
+object EscalationThresholds {
+    /** A local judge (VERIFY / EVAL) scoring the judged step below this escalates that step. */
+    const val JUDGE = 0.7
+    /** A VOTE merge whose winning share is below this escalates the step. */
+    const val VOTE = 0.6
+    /** Schema validation failures of one step that escalate it, when spread over at least [SCHEMA_PHONES] phones. */
+    const val SCHEMA_ATTEMPTS = 3
+    const val SCHEMA_PHONES = 2
+    /** Replicas that all disagree (no agreeing pair) before the step escalates. */
+    const val DISAGREEING_REPLICAS = 3
 }
 
 /**

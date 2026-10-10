@@ -37,7 +37,8 @@ class SchedulerImpl : Scheduler {
         for (t in dag.tasks) when (OpClasses.of(t.op)) {
             OpClass.OWNER -> out[t.id] = t.owner?.takeIf { it.isNotBlank() } ?: self
             OpClass.REDUCE -> out[t.id] = self
-            else -> free += t
+            // a data-free task pinned to an owner (private lineage, spec 7.4) runs there
+            else -> t.owner?.takeIf { it.isNotBlank() }?.let { out[t.id] = it } ?: run { free += t }
         }
         val order = free.sortedWith(compareByDescending<TaskSpec> { cost(it, null, self) }.thenBy { it.id })
         for (t in order) {
@@ -56,7 +57,7 @@ class SchedulerImpl : Scheduler {
         return when (OpClasses.of(task.op)) {
             OpClass.OWNER -> null                                         // owner tasks cannot move (R1)
             OpClass.REDUCE -> self.takeIf { it !in failed }
-            else -> {
+            else -> if (!task.owner.isNullOrBlank()) null else {         // pinned private lineage cannot move either
                 val ready = HashMap<String, Double>()
                 ps.forEach { ready[it.nodeId] = it.queueDepth * QUEUE_MS }
                 ready.putIfAbsent(self, 0.0)
