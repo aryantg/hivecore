@@ -331,6 +331,20 @@ class WorkQueue(
         return Assignment(chunks[i], node, no, duplicate, deadline)
     }
 
+    /**
+     * The TASK of attempt [no] of chunk [chunk] left for [node] now: its clock starts here, not at [assign]. Phone gate
+     * finding: the photos of a remote chunk took up to 12 s to ship, so its 10 s deadline had run out on arrival and a
+     * working phone was cancelled every time.
+     */
+    fun sent(node: String, chunk: Int, no: Int) {
+        val list = live[node] ?: return
+        val k = list.indexOfFirst { it.chunk == chunk && it.no == no }
+        if (k < 0) return
+        val a = list[k]
+        val shift = clock() - a.dispatchedAt
+        if (shift > 0) list[k] = Attempt(a.chunk, a.node, a.no, a.duplicate, a.dispatchedAt + shift, a.expectedDoneAt + shift, a.deadlineAt + shift)
+    }
+
     // ------------------------------------------------------------------ state helpers
 
     private fun terminal(i: Int): Boolean = i in outputs || i in failed || i in children

@@ -382,11 +382,11 @@ class SwarmNode(
         val recipe = recipeDefs(spec.recipeId)?.toRecipe()?.takeIf { spec.recipeVersion.isEmpty() || it.version == spec.recipeVersion }
             ?: recipes(spec.recipeId, spec.recipeVersion)
         val jobs = recipe?.let { SplitJob.forWorkload(spec, it) }
-        if (jobs.isNullOrEmpty()) return flow {
+        if (recipe == null || jobs.isNullOrEmpty()) return flow {
             emit(SplitProgress(spec.jobId, "", "", "", emptyList(), emptyList(), 0, 0, 0.0, 0.0, 0.0, 0, 0, 0, done = false,
                 error = "recipe ${spec.recipeId}@${spec.recipeVersion} is not installed"))
         }
-        return runStages(spec.jobId, RecipeJobs.Staged(jobs, emptyList()))
+        return runStages(spec.jobId, RecipeJobs.Staged(jobs, recipe.stages.filter { it.inputs.isNotEmpty() }.map { it.id }))
     }
 
     /** Runs each stage as one split job, in order; the last emission carries `{stages: {stageId: result}}` (+ `skipped`). */
@@ -431,9 +431,11 @@ class SwarmNode(
                     }
                     owner?.onPlan(plan, from) { t, b -> sendTo(from, t, b) }
                 }
-                MsgType.PLAN_CONSENT_REQ, MsgType.PLAN_CONSENT_RES, MsgType.TASK_RESULT, MsgType.TASK_YIELD ->
-                    if (commanderOrNull?.onMessage(type, from, body) != true && split?.onMessage(type, from, body) != true)
+                MsgType.PLAN_CONSENT_REQ, MsgType.PLAN_CONSENT_RES, MsgType.TASK_RESULT, MsgType.TASK_YIELD -> {
+                    val b = if (type == MsgType.TASK_RESULT) inlineOutput(body, from) ?: return else body
+                    if (commanderOrNull?.onMessage(type, from, b) != true && split?.onMessage(type, from, b) != true)
                         SLog.d(TAG, "$type from ${from.take(8)} matches no live plan or split job")
+                }
                 MsgType.TASK -> onTask(MeshJson.decode(body), from)
                 MsgType.TASK_CANCEL -> onCancel(MeshJson.decode(body), from)
                 MsgType.BLOB -> onBlob(MeshJson.decode(body), from)
@@ -496,11 +498,13 @@ class SwarmNode(
         val job = scope.launch {
             val files = body.task.blobs.map { id -> blobs?.file(id) }
             if (files.any { it == null }) {
+                SLog.w(TAG, "TASK ${body.task.id} from ${from.take(8)}: ${files.count { it == null }} of ${files.size} blob(s) missing")
                 reply(from, TaskResultBody(body.planId, body.task.id, selfId, error = "released items are missing on this phone", errorClass = SplitConstants.ERR_BLOBS_MISSING))
                 emit(event(body, WorkerEventKind.RESULT_FAILED, choice).copy(error = "released items are missing on this phone"))
                 return@launch
             }
             val inputs = body.task.inputs.map { body.inputs[it] ?: JsonNull }
+            SLog.d(TAG, "TASK ${body.task.id} ${body.task.op} from ${from.take(8)}: ${files.size} blob(s), running")
             if (choice != null) emit(event(body, WorkerEventKind.MODEL_SELECTED, choice))
             emit(event(body, WorkerEventKind.CHUNK_RUNNING, choice))
             val t0 = System.nanoTime()
@@ -510,11 +514,13 @@ class SwarmNode(
                     runner.run(body.task, inputs, files.filterNotNull(), from)
                 }
             val ms = (System.nanoTime() - t0) / 1_000_000
+            SLog.d(TAG, "TASK ${body.task.id} ran in $ms ms: ${r.exceptionOrNull()?.message ?: "ok"}")
             r.fold(
                 onSuccess = { out ->
                     val hash = Canon.hash(out)
-                    reply(from, TaskResultBody(body.planId, body.task.id, selfId, out, hash, ms = ms))
-                    emit(event(body, WorkerEventKind.RESULT_SENT, choice).copy(ms = ms))
+                    if (reply(from, TaskResultBody(body.planId, body.task.id, selfId, out, hash, ms = ms)))
+                        emit(event(body, WorkerEventKind.RESULT_SENT, choice).copy(ms = ms))
+                    else emit(event(body, WorkerEventKind.RESULT_FAILED, choice).copy(ms = ms, error = "the result did not reach the orchestrator"))
                     if (from != selfId) {
                         try { onWorkedForOthers(from, ms) } catch (e: Exception) { SLog.w(TAG, "contribution counter: ${e.message}") }
                         try { onTaskRan(body, from, out, hash) } catch (e: Exception) { SLog.w(TAG, "task receipt: ${e.message}") }
@@ -535,8 +541,34 @@ class SwarmNode(
         job.invokeOnCompletion { synchronized(lock) { if (workerJobs[key]?.second === job) workerJobs.remove(key) } }
     }
 
-    private suspend fun reply(to: String, res: TaskResultBody) {
-        sendTo(to, MsgType.TASK_RESULT, MeshJson.encode(res)).onFailure { SLog.w(TAG, "TASK_RESULT ${res.taskId} not sent: ${it.message}") }
+    /** False when the result did not leave this phone. */
+    private suspend fun reply(to: String, res: TaskResultBody): Boolean {
+        var body = MeshJson.encode(res)
+        val store = blobs
+        val output = res.output
+        if (body.length > MAX_INLINE_RESULT && output != null && to != selfId && store != null) {
+            // Phone gate finding: a 30-photo OCR chunk is ~74 KB of JSON, over the 64 KB envelope; send it as a blob.
+            val id = store.put(Canon.canonical(output).toByteArray(Charsets.UTF_8))
+            val sent = sendBlob(to, id, res.planId)
+            if (sent.isFailure) { SLog.w(TAG, "TASK_RESULT ${res.taskId}: output blob not sent: ${sent.exceptionOrNull()?.message}"); return false }
+            SLog.d(TAG, "TASK_RESULT ${res.taskId}: ${body.length} B output sent as blob ${id.take(8)} (${sent.getOrNull()} chunks)")
+            body = MeshJson.encode(res.copy(output = null, outputBlob = id))
+        }
+        return sendTo(to, MsgType.TASK_RESULT, body).onFailure { SLog.w(TAG, "TASK_RESULT ${res.taskId} not sent: ${it.message}") }.isSuccess
+    }
+
+    /**
+     * A TASK_RESULT whose output came as a blob ([TaskResultBody.outputBlob]) with the output restored inline, so the
+     * commanders see one shape; null (dropped) when the blob is missing or does not match the signed hash.
+     */
+    private fun inlineOutput(body: String, from: String): String? {
+        val res = MeshJson.decode<TaskResultBody>(body)
+        val id = res.outputBlob ?: return body
+        val bytes = blobs?.file(id)?.readBytes()
+        if (bytes == null) { SLog.w(TAG, "TASK_RESULT ${res.taskId} from ${from.take(8)}: output blob ${id.take(8)} missing"); return null }
+        val out = runCatching { Canon.json.parseToJsonElement(bytes.toString(Charsets.UTF_8)) }.getOrNull()
+        if (out == null || Canon.hash(out) != res.outputHash) { SLog.w(TAG, "TASK_RESULT ${res.taskId} from ${from.take(8)}: output blob does not match its hash"); return null }
+        return MeshJson.encode(res.copy(output = out, outputBlob = null))
     }
 
     private fun onCancel(b: TaskSignalBody, from: String) {
@@ -555,14 +587,21 @@ class SwarmNode(
         store.onChunk(b).onFailure { SLog.w(TAG, "BLOB ${b.blobId.take(8)} chunk ${b.seq}/${b.total} rejected: ${it.message}") }
     }
 
-    /** Sends every chunk of a stored blob to [to] (owner → worker, after a RELEASE). */
-    suspend fun sendBlob(to: String, blobId: String, jobId: String): Result<Int> {
+    /**
+     * Sends every chunk of a stored blob to [to] (owner → worker, after a RELEASE). Phone gate finding: every frame is
+     * signed by the Keystore key, so 16 KB frames moved a 30-photo chunk at ~0.9 MB/s on the office LAN; a peer whose
+     * profile reports a LAN link gets [LAN_CHUNK] frames (Nearby's 32 KB payload cap keeps the rest at [TRANSPORT_CHUNK]).
+     */
+    suspend fun sendBlob(to: String, blobId: String, jobId: String, chunkBytes: Int = blobChunkFor(to)): Result<Int> {
         val store = blobs ?: return Result.failure(IllegalStateException("no blob store"))
-        val chunks = store.chunks(blobId, selfId, jobId)
+        val chunks = store.chunks(blobId, selfId, jobId, chunkBytes)
         if (chunks.isEmpty()) return Result.failure(IllegalStateException("blob ${blobId.take(8)} is not stored"))
         for (c in chunks) sendTo(to, MsgType.BLOB, MeshJson.encode(c)).onFailure { return Result.failure(it) }
         return Result.success(chunks.size)
     }
+
+    private fun blobChunkFor(to: String): Int =
+        if (beacon?.snapshot()?.firstOrNull { it.nodeId == to }?.link?.kind == com.hivecore.core.LinkKind.LAN) LAN_CHUNK else TRANSPORT_CHUNK
 
     /** After the TASK_RESULT that used [blobIds] was countersigned: delete them and tell the owner. */
     suspend fun releaseBlobs(owner: String, jobId: String, blobIds: List<String>) {
@@ -584,6 +623,10 @@ class SwarmNode(
         }
         /** Chunk size that fits today's transports (Nearby bytes payloads ≤ 32 KB, router envelopes ≤ 64 KB) after base64. */
         const val TRANSPORT_CHUNK = 16 * 1024
+        /** Blob frame bytes over a LAN link: 40 KB is ~54 KB of base64, inside the 64 KB envelope with its headers. */
+        const val LAN_CHUNK = 40 * 1024
+        /** A TASK_RESULT body longer than this sends its output as a blob (envelopes are ≤ 64 KB with headers). */
+        const val MAX_INLINE_RESULT = 48 * 1024
         val TYPES = setOf(MsgType.PROFILE, MsgType.PLAN, MsgType.PLAN_CONSENT_REQ, MsgType.PLAN_CONSENT_RES, MsgType.TASK,
             MsgType.TASK_RESULT, MsgType.TASK_YIELD, MsgType.TASK_CANCEL, MsgType.BLOB, MsgType.BLOB_DELETED,
             // v2

@@ -19,6 +19,18 @@ class EligibilitySpecTest {
         assertEquals(38f, Eligibility.MAX_BATTERY_TEMP_C)
         assertEquals(40f, Eligibility.HEAVY_STOP_TEMP_C)
         assertEquals(2, Eligibility.HEAVY_STOP_THERMAL)
+    }
+
+    @Test fun demoLimitsRelaxEligibilityButKeepAHeavyStop() {
+        try {
+            Eligibility.relaxForDemo()
+            assertEquals(3, Eligibility.MAX_THERMAL)
+            assertTrue(heavyStop(4, 30f))
+            assertFalse(heavyStop(2, 42f))
+        } finally {
+            Eligibility.specLimits()
+        }
+        assertEquals(1, Eligibility.MAX_THERMAL)
         val d = DutyCycle()
         assertEquals(120_000L, d.workMs); assertEquals(30_000L, d.pauseMs)
     }

@@ -65,6 +65,13 @@ class StreamingJournal(
         for (batch in batches(rows, maxBatchBytes)) {
             val first = JournalRows.seqOf(batch.first()) ?: return
             val last = JournalRows.seqOf(batch.last()) ?: return
+            if (batch.size == 1 && batchBytes(batch) > maxBatchBytes) {
+                // Phone gate finding: a row over the envelope (a 30-photo OCR output) failed every time and held back
+                // every later row; skip it. The orchestrator's journal keeps it and RECLAIM restores it from the memo.
+                SLog.w(TAG, "JOURNAL to ${to.take(8)}: row $first of $jobId is ${batchBytes(batch)} B, over ${maxBatchBytes} B; not streamed")
+                synchronized(sent) { sent[key] = maxOf(sent[key] ?: 0L, last) }
+                continue
+            }
             val r = send(to, MsgType.JOURNAL, MeshJson.encode(JournalBody(jobId, selfId, first, batch)))
             if (r.isFailure) { SLog.w(TAG, "JOURNAL to ${to.take(8)}: ${r.exceptionOrNull()?.message}"); return }
             batchesSent++
@@ -77,7 +84,9 @@ class StreamingJournal(
         /** JSON bytes per JOURNAL body, under the 64 KB router envelope with room for the signature and framing. */
         const val MAX_BATCH_BYTES = 48 * 1024
 
-        /** Consecutive batches of at most [max] JSON bytes (a single larger row travels alone). */
+        private fun batchBytes(rows: List<JsonElement>): Int = rows.sumOf { it.toString().toByteArray(Charsets.UTF_8).size + 1 }
+
+        /** Consecutive batches of at most [max] JSON bytes (a single larger row is a batch of its own). */
         fun batches(rows: List<JsonElement>, max: Int): List<List<JsonElement>> {
             val out = ArrayList<List<JsonElement>>()
             var cur = ArrayList<JsonElement>()

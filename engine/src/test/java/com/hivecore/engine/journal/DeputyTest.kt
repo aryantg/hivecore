@@ -140,6 +140,28 @@ class DeputyTest {
         m.close()
     }
 
+    @Test fun aRowOverTheEnvelopeIsSkippedAndTheRowsAfterItStillStream() = runTest {
+        val m = JournalMesh(this)
+        val a = m.node("a"); val b = m.node("b")
+        val store = DeputyStore(b.db, b.port, b.memo, m.now)
+        store.start(b.scope)
+        m.start()
+        val streaming = StreamingJournal(a.journal, a.nodeId, { b.nodeId }, a.port::send, a.scope, maxBatchBytes = 600)
+        val t0 = m.now()
+        streaming.begin(JobRow("j2", "j2#1", "ph", "T1", JobState.RUNNING, t0, t0, "public", spec = buildJsonObject { put("op", "OCR") }))
+        streaming.chunk(ChunkRow("j2", "c0", 0, buildJsonObject { put("i", 0) }, null, ChunkStates.QUEUED, 0))
+        // c0's output is far over the batch limit (a 30-photo OCR chunk on a phone): it can never travel
+        streaming.output(OutputRow("j2", "c0", h("x".repeat(2_000)), out("x".repeat(2_000)), OutputRow.nodeSource(a.nodeId)))
+        streaming.chunk(ChunkRow("j2", "c0", 0, buildJsonObject { put("i", 0) }, null, ChunkStates.DONE, 1))
+        streaming.chunk(ChunkRow("j2", "c1", 1, buildJsonObject { put("i", 1) }, null, ChunkStates.QUEUED, 0))
+        advanceUntilIdle()
+        // the rows after it reached the deputy; only the big output row is missing there
+        assertEquals(a.journal.highWater("j2"), store.highWater(a.nodeId, "j2"))
+        assertEquals(a.journal.rowsAfter("j2", 0).second.size - 1, store.rowsFor(a.nodeId, "j2", 0).size)
+        streaming.close()
+        m.close()
+    }
+
     @Test fun deputyRowsAreTheWireRowsOfTheJournal() = runTest {
         val m = JournalMesh(this)
         val a = m.node("a"); val b = m.node("b")

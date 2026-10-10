@@ -236,6 +236,11 @@ object MeshJson {
      * free-text `error` rather than replacing it so pre-v2 nodes and tests still parse.
      */
     val errorClass: String? = null,
+    /**
+     * A result too large for one envelope travels as a blob sent just before this message (BLOB chunks, owner = the
+     * executor); `output` is then null and the receiving node restores it from the blob, checked against `outputHash`.
+     */
+    val outputBlob: String? = null,
 )
 
 /** TASK_YIELD (executor → commander, the owner picked the phone up) and TASK_CANCEL (commander → executor). */

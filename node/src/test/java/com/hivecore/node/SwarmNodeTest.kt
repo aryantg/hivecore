@@ -15,7 +15,16 @@ import com.hivecore.mesh.MsgType
 import com.hivecore.mesh.TaskBody
 import com.hivecore.mesh.TaskResultBody
 import com.hivecore.mesh.TaskSignalBody
+import com.hivecore.core.OpExecutor
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.TestScope
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -25,6 +34,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.File
 import kotlin.random.Random
 
 class SwarmNodeTest {
@@ -49,6 +59,18 @@ class SwarmNodeTest {
         assertEquals(1, accounts.got(MsgType.BLOB_DELETED).size)
     }
 
+    @Test fun lanSizedBlobFramesFitTheEnvelope() = runTest {
+        val h = mesh()
+        val (hr, _, accounts) = h.hrSalesAccounts()
+        h.start()
+        val bytes = Random(5).nextBytes(250_000)                 // one photo
+        val id = accounts.swarm.blobs!!.put(bytes)
+        val n = accounts.swarm.sendBlob(hr.nodeId, id, "job2", SwarmNode.LAN_CHUNK).getOrThrow()
+        runCurrent()
+        assertEquals((bytes.size + SwarmNode.LAN_CHUNK - 1) / SwarmNode.LAN_CHUNK, n)
+        assertArrayEquals(bytes, hr.swarm.blobs!!.file(id)!!.readBytes())
+    }
+
     @Test fun workerModeOffYieldsAndWorkerTasksAreIdempotent() = runTest {
         val h = mesh()
         val hr = h.node("hr", "HR", NodeRole.HR, eligible = false)
@@ -69,5 +91,34 @@ class SwarmNodeTest {
         assertEquals(1, hr.extract.runs)
         val res = sales.got(MsgType.TASK_RESULT).map { MeshJson.decode<TaskResultBody>(it.body) }.single()
         assertEquals(Canon.hash(res.output!!), res.outputHash)
+    }
+
+    /** One ~40 KB text per item: a two-item chunk's result is over the 64 KB envelope, like a 30-photo OCR chunk. */
+    private class BigOut : OpExecutor {
+        override val ops = setOf(Op.EMBED)
+        override suspend fun execute(task: TaskSpec, inputs: List<JsonElement>, blobs: List<File>): Result<JsonElement> {
+            val items = (task.params["texts"] as JsonArray).map { t ->
+                val id = t.jsonObject["id"]!!
+                buildJsonObject { put("id", id); put("text", Canon.sha256Hex(id.toString()).repeat(640)) }
+            }
+            return Result.success(buildJsonObject { put("op", "EMBED"); put("items", JsonArray(items)) })
+        }
+    }
+
+    @Test fun aResultOverTheEnvelopeTravelsAsABlobAndMergesLikeAnInlineOne() = runTest {
+        val h = mesh()
+        val (hr, sales, accounts) = h.hrSalesAccounts()
+        listOf(hr, sales, accounts).forEach { it.runner.register(BigOut()) }
+        h.start()
+        val texts = (0 until 6).map { i -> buildJsonObject { put("id", "t$i"); put("text", "item $i") } }
+        val job = SplitJob("big", Op.EMBED, JsonObject(emptyMap()), "hash", SplitInput.Items(texts), chunks = 3)
+        val p = hr.swarm.runJob(job, useMemo = false).toList().last()
+        runCurrent()
+        assertTrue(p.error ?: "", p.done)
+        val whole = BigOut().execute(TaskSpec("w", Op.EMBED, JsonObject(mapOf("texts" to JsonArray(texts)))), emptyList(), emptyList()).getOrThrow()
+        assertEquals(Canon.hash(whole), p.resultHash)
+        // the remote chunks came back by blob: their TASK_RESULT carried no inline output
+        val remote = hr.got(MsgType.TASK_RESULT).map { MeshJson.decode<TaskResultBody>(it.body) }.filter { it.node != hr.nodeId }
+        assertTrue(remote.isNotEmpty() && remote.all { it.output == null && it.outputBlob != null })
     }
 }

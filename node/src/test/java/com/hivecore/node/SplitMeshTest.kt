@@ -312,6 +312,10 @@ class SplitMeshTest {
         val priv = SplitJob.forWorkload(WorkloadSpec("w2", "r", "1", m.b.nodeId, listOf("a")), recipe).single()
         assertEquals(m.b.nodeId, priv.owner)
         assertEquals(listOf(true), (priv.input as SplitInput.Blobs).private)
+        // a stage that consumes an earlier stage's output is not run over the raw files
+        val chained = Recipe("c", "1", "chained", listOf(TaskSpec("ocr", Op.OCR, JsonObject(emptyMap())),
+            TaskSpec("layout", Op.LAYOUT, JsonObject(emptyMap()), inputs = listOf("ocr")), TaskSpec("iqa", Op.IQA, JsonObject(emptyMap()))), emptyList())
+        assertEquals(listOf("w3/ocr", "w3/iqa"), SplitJob.forWorkload(WorkloadSpec("w3", "c", "1", m.a.nodeId, listOf("a")), chained).map { it.jobId })
     }
 
     @Test fun swarmNodeIsTheCoreJobRunner() = runTest {

@@ -46,7 +46,7 @@ object Features {
         val on = screensFor(flags)
         val all: Map<Screen, @Composable () -> Unit> = mapOf(
             Screen.ASK to { AskRoute(graph.ask) },
-            Screen.JOBS to { JobsRoute(graph.jobs) },
+            Screen.JOBS to { JobsRoute(graph.jobs, onPickFiles = rememberFilePicker { graph.jobs.addItems(it) }) },
             Screen.SWARM to { SwarmRoute(graph.swarm) },
             Screen.MODELS to { ModelsRoute(graph.models) },
             Screen.DATA to { DataRoute(graph.data) },

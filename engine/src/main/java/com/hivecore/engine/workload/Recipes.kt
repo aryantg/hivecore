@@ -62,7 +62,7 @@ object Recipes {
     /** The recipes every build ships (plan §4A.4 plus the two splitting showcases). */
     val BUILT_IN = listOf(
         "invoice_inbox", "site_photo_audit", "meeting_minutes", "cctv_count", "catalog_cleanup", "product_shot_batch",
-        "gate2_eval", "synth_questions", "bench_all", "long_doc_summary", "image_batch_variants",
+        "gate2_eval", "synth_questions", "bench_all", "long_doc_summary", "image_batch_variants", "photo_text",
     )
 
     private val ID = Regex("[a-z][a-z0-9_]*")

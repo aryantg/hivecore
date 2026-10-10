@@ -6,8 +6,8 @@ Updated 2026-10-10 (phases 1-8 merged and wired behind their flags; the integrat
 
 - Multi-module Android project (AGP 8.13.2, Kotlin 2.4.20, Compose BOM 2026.06.01, compileSdk 36, minSdk 31, JDK 17) plus `relayd/` (Go).
 - `tools/gradle.sh <args>` is the only way to run Gradle on this machine (one build at a time across every checkout).
-- JVM unit tests: `tools/gradle.sh testDebugUnitTest` runs 974 tests, all green, in about two minutes warm (the four-seed soak harness `SoakTest` is among them); `relayd` has 18 Go tests.
-- Debug APK: `tools/gradle.sh :app:assembleDebug` (every flag off) and `tools/gradle.sh :app:assembleDebug -PhiveFeatures=all` both build. Flags: `mesh,runtime,split,graph,remote,state,cloud,hardening`.
+- JVM unit tests: `tools/gradle.sh testDebugUnitTest` runs 982 tests, all green, in about two minutes warm (the four-seed soak harness `SoakTest` is among them); `relayd` has 18 Go tests.
+- Debug APK: `tools/gradle.sh :app:assembleDebug` (every flag off) and `tools/gradle.sh :app:assembleDebug -PhiveFeatures=all` both build. `-PhiveDemoThermal` relaxes the thermal limits for demos (not for gate runs). Flags: `mesh,runtime,split,graph,remote,state,cloud,hardening`.
 
 ## Module table
 

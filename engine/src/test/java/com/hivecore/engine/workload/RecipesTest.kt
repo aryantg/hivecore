@@ -35,6 +35,7 @@ class RecipesTest {
         assertEquals(listOf(Op.GEN_VARIANTS, Op.SCORE_IMAGE, Op.RANK, Op.UPSCALE), byId.getValue("product_shot_batch").stages.map { it.op })
         assertEquals(listOf(Op.SYNTH_GEN, Op.SYNTH_VALIDATE, Op.EVAL), byId.getValue("synth_questions").stages.map { it.op })
         assertEquals(listOf(Op.BENCH), byId.getValue("bench_all").stages.map { it.op })
+        assertEquals(listOf(Op.OCR), byId.getValue("photo_text").stages.map { it.op })
     }
 
     @Test fun generativeRecipesGoToAFolderAndConvertToCoreRecipe() {

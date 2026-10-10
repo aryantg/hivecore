@@ -22,13 +22,27 @@ data class Signals(
 object Eligibility {
     const val SCREEN_OFF_IDLE_MS = 60_000L
     const val MIN_BATTERY_PCT = 40
-    const val MAX_THERMAL = 1
+    // The thermal limits are the spec's (§6.1) unless a demo build relaxed them at start-up ([relaxForDemo]).
+    @Volatile var MAX_THERMAL = 1
+        private set
     /** Worker eligibility needs the battery strictly under this. */
-    const val MAX_BATTERY_TEMP_C = 38f
+    @Volatile var MAX_BATTERY_TEMP_C = 38f
+        private set
     /** Heavy work stops at or above this battery temperature. */
-    const val HEAVY_STOP_TEMP_C = 40f
+    @Volatile var HEAVY_STOP_TEMP_C = 40f
+        private set
     /** Heavy work stops at or above this thermal status. */
-    const val HEAVY_STOP_THERMAL = 2
+    @Volatile var HEAVY_STOP_THERMAL = 2
+        private set
+
+    /**
+     * Demo builds (`-PhiveDemoThermal`): phones stay eligible up to SEVERE (3) and a 45 °C battery; heavy work still
+     * stops at CRITICAL (4) or 47 °C. Not for a gate run: the spec limits are the defaults.
+     */
+    fun relaxForDemo() { MAX_THERMAL = 3; MAX_BATTERY_TEMP_C = 45f; HEAVY_STOP_TEMP_C = 47f; HEAVY_STOP_THERMAL = 4 }
+
+    /** Back to the spec limits. */
+    fun specLimits() { MAX_THERMAL = 1; MAX_BATTERY_TEMP_C = 38f; HEAVY_STOP_TEMP_C = 40f; HEAVY_STOP_THERMAL = 2 }
 }
 
 /** Screen off for at least 60 s, or on the charger with the app not in the foreground. */

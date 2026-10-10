@@ -48,9 +48,10 @@ import kotlinx.serialization.json.JsonPrimitive
     companion object {
         /**
          * One split job per recipe stage over the workload's items (released items only when `release == "items"`;
-         * otherwise every chunk stays on the owner: private mode).
+         * otherwise every chunk stays on the owner: private mode). Every job reads the workload's own files, so a stage
+         * fed by an earlier stage's output (`inputs` non-empty) gets no job here, as in RecipeJobs.
          */
-        fun forWorkload(spec: WorkloadSpec, recipe: Recipe): List<SplitJob> = recipe.stages.map { st ->
+        fun forWorkload(spec: WorkloadSpec, recipe: Recipe): List<SplitJob> = recipe.stages.filter { it.inputs.isEmpty() }.map { st ->
             SplitJob("${spec.jobId}/${st.id}", st.op, st.params, st.modelId,
                 SplitInput.Blobs(spec.items, private = spec.items.map { spec.release != "items" }), owner = spec.owner)
         }
