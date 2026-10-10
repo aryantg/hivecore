@@ -8,11 +8,13 @@ import java.io.File
 import java.util.Base64
 
 /**
- * Content-addressed blob files for released items (swarm plan §4A.1, §8.1): `<dir>/<sha256>` where `dir` is
- * `filesDir/blobs`. [chunks] splits a blob into BLOB bodies of at most [chunkBytes] raw bytes (≤ 900 KB, [MAX_CHUNK]);
- * [onChunk] reassembles them in memory and keeps the file only when the whole content hashes to `blobId`, so a
- * corrupted or forged chunk loses the blob instead of storing wrong bytes. After the TASK_RESULT that used a blob is
- * countersigned, [deleteAfterCountersign] removes the files and returns the BLOB_DELETED body for the owner.
+ * Content-addressed blob files for released items (§13.5, P2): `<dir>/<sha256>` where `dir` is `files/blobs`.
+ * [chunks] splits a blob into BLOB bodies of at most [chunkBytes] raw bytes (≤ 900 KB, [MAX_CHUNK]); [onChunk]
+ * reassembles them in memory and keeps the file only when the whole content hashes to `blobId`, so a corrupted or
+ * forged piece loses the blob instead of storing wrong bytes ([rejections] counts those per blob). After the
+ * TASK_RESULT that used a blob is countersigned, [deleteAfterCountersign] removes the files and returns the
+ * BLOB_DELETED body for the owner. The sender-side rule of §14 (re-sent once, then the phone is skipped) is
+ * [BlobDeliveries].
  *
  * Note: the router's envelope limit (MeshRouter.MAX_ENVELOPE, 64 KB) and Nearby's 32 KB bytes payloads bound what
  * travels today, so SwarmNode uses a smaller chunk size than the 900 KB the plan allows.
@@ -31,6 +33,15 @@ class BlobStore(
 
     private val lock = Any()
     private val partial = HashMap<String, Partial>()
+    private val rejected = HashMap<String, Int>()
+
+    /** How many received copies of [blobId] were dropped because a piece was corrupted or forged (§13.5). */
+    fun rejections(blobId: String): Int = synchronized(lock) { rejected[blobId] ?: 0 }
+
+    /** Every blob this phone has dropped at least once, with the count (the node reports `blobs_missing` to the owner). */
+    fun rejections(): Map<String, Int> = synchronized(lock) { rejected.toMap() }
+
+    private fun reject(blobId: String) { synchronized(lock) { rejected[blobId] = (rejected[blobId] ?: 0) + 1 } }
 
     private fun ensureDir() { if (!dir.exists()) dir.mkdirs() }
 
@@ -79,6 +90,7 @@ class BlobStore(
             val p = partial.getOrPut(b.blobId) { Partial(b.total, b.owner, b.jobId) }
             if (p.total != b.total || p.owner != b.owner) {
                 partial.remove(b.blobId)
+                rejected[b.blobId] = (rejected[b.blobId] ?: 0) + 1
                 return Result.failure(IllegalArgumentException("chunk disagrees with earlier chunks of ${b.blobId.take(8)}"))
             }
             val prev = p.parts.put(b.seq, raw)
@@ -96,6 +108,7 @@ class BlobStore(
         val bytes = out.toByteArray()
         val hash = Hashing.sha256Hex(bytes)
         if (hash != b.blobId) {
+            reject(b.blobId)
             SLog.w(TAG, "blob ${b.blobId.take(8)} from ${b.owner.take(8)} rejected: content hashes to ${hash.take(8)}")
             return Result.failure(IllegalStateException("blob content does not match its id"))
         }
@@ -129,5 +142,55 @@ class BlobStore(
         private const val TAG = "BlobStore"
         /** The plan's per-frame limit (§8.1). */
         const val MAX_CHUNK = 900 * 1024
+    }
+}
+
+/**
+ * Sender-side delivery counters for §14 "blob corrupted in transit: blob dropped, re-sent once, then that phone is
+ * skipped for chunks needing it". The orchestrator's queue asks [canSend] before offering a blob-carrying chunk to a
+ * phone (and [skips] for a whole chunk), records [sent] after the pieces went out, [delivered] when the phone
+ * acknowledged the blob (its first TASK_RESULT over it, or BLOB_DELETED later), and [failed] when the phone reports
+ * the blob missing or rejected (TASK_RESULT error class `blobs_missing`). After [maxFailures] failed deliveries of
+ * one blob to one phone, [canSend] is false for that pair: the second send was the one re-send the rule allows.
+ */
+class BlobDeliveries(val maxFailures: Int = MAX_FAILURES) {
+    private class Counters(var sends: Int = 0, var failures: Int = 0, var delivered: Boolean = false)
+
+    private val lock = Any()
+    private val pairs = HashMap<String, Counters>()
+    private fun key(node: String, blobId: String) = "$node|$blobId"
+    private fun at(node: String, blobId: String) = pairs.getOrPut(key(node, blobId)) { Counters() }
+
+    fun sends(node: String, blobId: String): Int = synchronized(lock) { pairs[key(node, blobId)]?.sends ?: 0 }
+    fun failures(node: String, blobId: String): Int = synchronized(lock) { pairs[key(node, blobId)]?.failures ?: 0 }
+    /** The phone acknowledged [blobId]: no need to send it again before its next chunk. */
+    fun holds(node: String, blobId: String): Boolean = synchronized(lock) { pairs[key(node, blobId)]?.delivered == true }
+
+    fun sent(node: String, blobId: String) { synchronized(lock) { at(node, blobId).sends++ } }
+    fun delivered(node: String, blobId: String) { synchronized(lock) { at(node, blobId).delivered = true } }
+
+    /** One failed delivery; true when the blob may be re-sent to that phone (its one re-send), false when the phone is now skipped. */
+    fun failed(node: String, blobId: String): Boolean = synchronized(lock) {
+        val p = at(node, blobId); p.failures++; p.delivered = false
+        p.failures < maxFailures
+    }
+
+    /** Whether [blobId] may still be sent to [node]. */
+    fun canSend(node: String, blobId: String): Boolean = failures(node, blobId) < maxFailures
+
+    /** Whether a chunk needing [blobIds] must not be offered to [node] (§14): one of its blobs is past its re-send. */
+    fun skips(node: String, blobIds: Collection<String>): Boolean = blobIds.any { !canSend(node, it) }
+
+    /** The blobs [node] is skipped for. */
+    fun skipped(node: String): Set<String> = synchronized(lock) {
+        pairs.filter { (k, p) -> k.startsWith("$node|") && p.failures >= maxFailures }.keys.map { it.substringAfter('|') }.toSet()
+    }
+
+    /** Forgets a phone (it left the job). */
+    fun forget(node: String) { synchronized(lock) { pairs.keys.removeAll { it.startsWith("$node|") } } }
+
+    companion object {
+        /** §14: one re-send, then skip. */
+        const val MAX_FAILURES = 2
     }
 }
