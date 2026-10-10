@@ -32,6 +32,8 @@ android {
         flag("FEATURE_CLOUD", "cloud")            // phase 8: escalation gate, T2 planner (orchestrator only)
         flag("FEATURE_HARDENING", "hardening")    // phase 9: re-cut, deputy, store-and-forward, soak
         flag("FEATURE_DECIDE", "decide")          // decision model at the chunking stage (docs/plans/decision-chunking.md)
+        // Demo builds only (-PhiveDemoThermal): relaxed thermal limits for sharing (Eligibility.relaxForDemo).
+        buildConfigField("boolean", "DEMO_THERMAL", (project.findProperty("hiveDemoThermal") != null).toString())
     }
 
     buildTypes {

@@ -149,6 +149,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
@@ -241,6 +242,10 @@ object AppWiring {
             device = DeviceStateMonitor(app).also { it.start() }
             presence = PresenceMonitor(app).also { it.start() }
             scope.launch(Dispatchers.IO) {
+                // Phone gate finding: with the screen off the system killed the app for low memory, the worker service
+                // brought it back, the eager 4 GB LLM load started again and the next kill came ~40 s later, in a loop.
+                // After a low-memory exit the LLM is left to load on demand (MODEL_REQ).
+                if (lastExitWasLowMemory(app)) { warn("last exit was low memory: the LLM loads on demand"); return@launch }
                 val avail = runCatching { engine.available() }.getOrDefault(emptySet())
                 val pick = listOf(LlmBackend.NPU, LlmBackend.GPU, LlmBackend.CPU).firstOrNull { it in avail }
                 if (pick == null) warn("no LLM bundle found under ${GenieXEngine.defaultRoots(app).joinToString { it.name }}")
@@ -426,10 +431,17 @@ object AppWiring {
         val policyFactory: (TaskRunnerImpl) -> WorkerPolicy = { runner ->
             val d = device; val pm = presence
             if (Features.runtime && d != null && pm != null) {
+                lateinit var policy: WorkerPolicyImpl
+                val ownerYield = OwnerYield({ runner.yieldAll(); policy.recompute() }, { runner.resumeWorkers(); policy.recompute() }, clock)
+                // Phone gate finding: OwnerYield.tick (the 60 s screen-off resume) ran only on a new presence value; with
+                // the screen off nothing changes, so a phone that yielded once never worked again. The heartbeat drives it.
                 WorkerPolicyImpl(selfId, d, pm.presence, llm, prefs, runner.queueDepth, scope, pool = pool, registry = registry,
-                    qairt = "2.50.0", onTick = pm::refresh, clock = clock, catalog = { catalog }, cooldowns = cooldowns, bench = { benchTable.p50(catalog) },
-                    extraInstalled = { if (llm.backend.value != null) setOf(ModelPoolImpl.LLM_QAIRT_ID) else emptySet() }).also { p ->
-                    OwnerYield(runner::yieldAll, runner::resumeWorkers, clock).hook(pm, scope)
+                    qairt = "2.50.0", onTick = { pm.refresh(); ownerYield.tick(clock()) }, clock = clock, catalog = { catalog }, cooldowns = cooldowns, bench = { benchTable.p50(catalog) },
+                    extraInstalled = { if (llm.backend.value != null) setOf(ModelPoolImpl.LLM_QAIRT_ID) else emptySet() },
+                    yielding = { runner.yielding }).also { p ->
+                    policy = p
+                    ownerYield.hook(pm, scope)
+                    WorkerLocks(app).bind(runner.queueDepth, p.profile.map { it.eligible }, scope)
                     WorkerModeController(WorkerService.control(app), clock).bind(p.optIn, scope)
                 }
             } else FakeWorkerPolicy(Profile(selfId, clock(), llm.backend.value, idle = true, charging = true, batteryPct = 100, eligible = false, big = "none"))
@@ -571,6 +583,8 @@ object AppWiring {
     }
 
     private const val GUEST = "relay-guest"
+    /** How long the queue waits after the first MODEL_READY for the other asked phones (placeJob). */
+    private const val READY_GRACE_MS = 1_500L
     private val registeredOps = MutableStateFlow(com.hivecore.core.OpRegistry.entries.keys)
     @Volatile private var swarmPortRef: SwarmPortImpl? = null
 
@@ -582,6 +596,11 @@ object AppWiring {
      * nothing can be placed). Later READYs reach the live run through the shared planId; the coordinator stays in
      * [coordinators] until the job's last emission.
      */
+    private fun lastExitWasLowMemory(app: Context): Boolean = runCatching {
+        val am = app.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        am.getHistoricalProcessExitReasons(app.packageName, 0, 1).firstOrNull()?.reason == android.app.ApplicationExitInfo.REASON_LOW_MEMORY
+    }.getOrDefault(false)
+
     private suspend fun placeJob(job: SplitJob, planId: String, selfId: String, catalog: ModelCatalog, cooldowns: CooldownTable, node: SwarmNode,
                                  journal: JobJournal, coordinators: ConcurrentHashMap<String, PlacementCoordinator>, scope: CoroutineScope): Set<String>? {
         val cap = job.cap ?: return null
@@ -598,6 +617,10 @@ object AppWiring {
         if (out.assignments.isEmpty()) { coordinators.remove(job.jobId); return null }
         pc.watch(scope)
         withTimeoutOrNull(out.assignments.maxOf { a -> catalog.entry(a.modelId, cap)?.let { PlacementCoordinator.deadlineMs(it) } ?: PlacementCoordinator.MIN_DEADLINE_MS } + 1_000) { opened.await() }
+        // Phone gate finding: this phone's own MODEL_READY arrives first, and cutting the chunks then sized the job for
+        // one phone (two 60-photo chunks, both taken by its own slots) while the others reported ready 20-200 ms later.
+        // Give the asked phones a short grace; a phone still loading a cold model joins the running job later.
+        withTimeoutOrNull(READY_GRACE_MS) { while (pc.pending(cap).isNotEmpty()) delay(50) }
         return pc.ready(cap).takeIf { it.isNotEmpty() }
     }
 }

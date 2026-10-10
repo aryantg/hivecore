@@ -244,6 +244,8 @@ class SwarmViewModel(
             val t = p.batteryTempC
             if (t != null && t >= Eligibility.MAX_BATTERY_TEMP_C) add("battery at ${Format.temperature(t)} (needs under ${Eligibility.MAX_BATTERY_TEMP_C.toInt()} °C)")
             if (p.inCall) add("in a call")
+            // every rule holds but the phone still refuses work: it yielded to its owner and waits for the screen to stay off
+            if (isEmpty() && !p.eligible) add("it was in use (it takes work again once the screen has been off for ${Eligibility.SCREEN_OFF_IDLE_MS / 1000} s)")
         }
 
         fun eligibilityLine(eligible: Boolean, reasons: List<String>): String = when {

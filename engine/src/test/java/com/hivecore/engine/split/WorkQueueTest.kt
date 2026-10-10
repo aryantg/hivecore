@@ -130,6 +130,17 @@ class WorkQueueTest {
         assertEquals(SplitConstants.MIN_DEADLINE_MS, near.deadlineMs)          // floor of 4 s (3 s + 20 ms)
     }
 
+    @Test fun theDeadlineStartsWhenTheTaskIsSentNotWhenItsBlobsStartShipping() {
+        val q = queue(2, listOf("me", "near"), per = 1)
+        val near = q.fill().single { it.node == "near" }
+        now += near.deadlineMs - 1                       // the photos took almost the whole deadline to arrive
+        q.sent("near", near.chunk.index, near.attempt)
+        now += 2
+        assertTrue(q.overdue().none { it.node == "near" })   // without sent() this attempt would be overdue now
+        now += near.deadlineMs
+        assertTrue(q.overdue().any { it.node == "near" })
+    }
+
     @Test fun blobChunksNeverGoOverBluetoothOrTheRelayButTextChunksDo() {
         val q = queue(4, listOf("me", "bt", "relay"), blobs = true, links = mapOf("bt" to bt, "relay" to relay))
         val first = q.fill()

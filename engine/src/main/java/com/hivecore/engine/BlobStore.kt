@@ -62,7 +62,8 @@ class BlobStore(
     fun has(blobId: String): Boolean = file(blobId) != null
 
     /** The BLOB bodies for [blobId], in order; empty when the blob is not stored. */
-    fun chunks(blobId: String, owner: String, jobId: String): List<BlobBody> {
+    fun chunks(blobId: String, owner: String, jobId: String, chunkBytes: Int = this.chunkBytes): List<BlobBody> {
+        require(chunkBytes in 1..MAX_CHUNK) { "chunkBytes must be 1..$MAX_CHUNK" }
         val bytes = file(blobId)?.readBytes() ?: return emptyList()
         val total = maxOf(1, (bytes.size + chunkBytes - 1) / chunkBytes)
         val enc = Base64.getEncoder()
