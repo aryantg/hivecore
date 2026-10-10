@@ -1,6 +1,7 @@
 package com.hivecore.ledger
 
 import com.hivecore.core.JdbcSqlDb
+import com.hivecore.core.LedgerEntry
 import com.hivecore.core.fakes.FakeBus
 import com.hivecore.core.fakes.FakeLedgerStore
 import com.hivecore.core.fakes.FakeSigner
@@ -140,5 +141,43 @@ class ReceiptExchangeTest {
         // Sales' answer entry carries HR's ask receipt.
         assertEquals(hr.nodeId, sales.ledger.entries().single().peerNode)
         assertTrue(hr.ledger.verifyChain())
+    }
+
+    /** §13.6 for a split job: the orchestrator's `plan` entry and every executor's `task` entries countersign each other. */
+    @Test fun splitJobReceiptsGoToEveryPhoneThatExecutedWork() = runTest {
+        val (hr, sales, accounts) = mesh("hr" to "HR", "sales" to "Sales", "accounts" to "Accounts")
+        val jobId = "split-1"
+        fun task(chunk: String, index: Int, node: String) = TaskEntry(jobId, "$jobId#1", chunk, index,
+            executors = listOf(Executor(node, 1, "ok", "h$index")), outputHash = "h$index", source = "node:$node", verifiedBy = listOf(hr.nodeId))
+        // Sales ran two chunks and sends one receipt (over its newest entry); Accounts ran one. Both land before the plan.
+        val sE = sales.exchange.afterSplitExecutor(jobId, hr.nodeId, listOf(task("c0", 0, sales.nodeId), task("c1", 1, sales.nodeId)))
+        val aE = accounts.exchange.afterSplitExecutor(jobId, hr.nodeId, SplitLedger.json.encodeToString(TaskEntry.serializer(), task("c2", 2, accounts.nodeId)))
+        advanceUntilIdle()
+        assertEquals(listOf("task", "task"), sE.map { it.kind })
+        assertEquals(sE[0].entryHash, sE[1].prevHash)
+        assertNull(hr.ledger.entries().firstOrNull())                           // held until the plan entry exists
+        val plan = PlanEntry(jobId, "$jobId#1", "ph", "recipe", "local", "public", "done", emptyMap(), chunks = 3,
+            chunkOrder = listOf(ChunkRef(0, "c0", "h0"), ChunkRef(1, "c1", "h1"), ChunkRef(2, "c2", "h2")), resultHash = "r",
+            executors = listOf(sales.nodeId, accounts.nodeId), createdTs = clock, finishedTs = clock)
+        val hE = hr.exchange.afterSplitOrchestrator(jobId, listOf(sales.nodeId, accounts.nodeId, hr.nodeId), SplitLedger.json.encodeToString(PlanEntry.serializer(), plan))
+        advanceUntilIdle()
+        assertEquals("plan", hE.kind)
+        // Each executor's newest task entry carries the orchestrator's plan hash and signature.
+        for ((n, e) in listOf(sales to sE.last(), accounts to aE)) {
+            val stored = n.ledger.entriesFor(jobId).last()
+            assertEquals(e.entryHash, stored.entryHash)
+            assertEquals(hr.nodeId, stored.peerNode); assertEquals(hE.entryHash, stored.peerEntryHash)
+            assertTrue(n.ledger.verifyPeerSig(stored, hr.signer.publicKeyB64))
+            assertTrue(n.ledger.verifyChain())
+        }
+        assertNull(sales.ledger.entriesFor(jobId).first().peerNode)              // the older task entry is covered by the chain
+        // The orchestrator holds both executors' receipts: one on the plan entry, the second as a receipt entry.
+        val byPeer = hr.ledger.entriesFor(jobId).associateBy { it.peerNode }
+        assertEquals(sE.last().entryHash, byPeer[sales.nodeId]!!.peerEntryHash)
+        assertEquals(aE.entryHash, byPeer[accounts.nodeId]!!.peerEntryHash)
+        assertTrue(hr.ledger.verifyChain())
+        assertTrue(hr.ledger.verifyPeerSig(byPeer[sales.nodeId]!!, sales.signer.publicKeyB64))
+        assertTrue(hr.ledger.verifyPeerSig(byPeer[accounts.nodeId]!!, accounts.signer.publicKeyB64))
+        assertEquals(emptyList<LedgerEntry>(), sales.exchange.afterSplitExecutor(jobId, hr.nodeId, emptyList()))
     }
 }

@@ -7,6 +7,10 @@ import com.hivecore.core.SLog
 import com.hivecore.core.Signer
 import com.hivecore.core.SqlDb
 import com.hivecore.core.Verify
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.util.Base64
@@ -16,8 +20,10 @@ import java.util.Base64
  * peerEntryHash, peerSig, ts)`. `entryHash = sha256Hex(prevHash \n jobId \n kind \n ts \n entry)` ([hashOf]: the
  * row's jobId, kind and ts are inside the hash, so none can be edited without breaking the chain), genesis
  * `prevHash = "0" * 64`, `sig` = node key over the entryHash bytes (base64 DER). Kinds: `ask`, `answer`, `close`,
- * `reset` (marker), and `receipt` (a second peer's countersignature for a job that already carries one, see
- * [countersign]).
+ * `reset` (marker), `receipt` (a second peer's countersignature for a job that already carries one, see
+ * [countersign]), and for split jobs (§13.6) `plan` (one per job, on the orchestrator) and `task` (one per executed
+ * chunk, on every phone that executed work; see [SplitLedger]). [exportJson] is the chain as the Settings screen
+ * shows and shares it.
  *
  * [verifyChain] checks every link (prevHash -> previous entryHash), every entryHash, every signature with this
  * node's key and every peer countersignature with that peer's pinned key ([peerKey]; a peer that has since been
@@ -106,6 +112,35 @@ class Ledger(
 
     fun count(): Long = (db.query("SELECT COUNT(*) AS n FROM _receipts").first()["n"] as Number).toLong()
 
+    /** Entries of one [kind], oldest first. */
+    fun entriesOfKind(kind: String, limit: Int = 200): List<LedgerEntry> =
+        db.query("SELECT * FROM _receipts WHERE kind = ? ORDER BY seq LIMIT ?", listOf(kind, limit)).map(::row)
+
+    /**
+     * The chain as JSON for the Settings screen (§13.6): `{node, exportedTs, verified, count, entries: [...]}`, oldest
+     * first, each entry with every column and its `entry` parsed back into JSON so the export is one document. A
+     * reader re-checks the chain with [hashOf] over `prevHash, jobId, kind, ts, entry` and the signatures with `node`.
+     */
+    @Synchronized
+    fun exportJson(limit: Int = Int.MAX_VALUE): JsonObject {
+        val rows = db.query("SELECT * FROM _receipts ORDER BY seq LIMIT ?", listOf(limit)).map(::row)
+        return buildJsonObject {
+            put("node", signer.publicKeyB64)
+            put("exportedTs", now())
+            put("verified", verifyChain())
+            put("count", rows.size)
+            put("entries", JsonArray(rows.map { e ->
+                buildJsonObject {
+                    put("seq", e.seq); put("jobId", e.jobId); put("kind", e.kind)
+                    put("entry", runCatching { JSON.parseToJsonElement(e.entry) }.getOrElse { JsonPrimitive(e.entry) })
+                    put("entryHash", e.entryHash); put("prevHash", e.prevHash); put("sig", e.sig)
+                    e.peerNode?.let { put("peerNode", it) }; e.peerEntryHash?.let { put("peerEntryHash", it) }; e.peerSig?.let { put("peerSig", it) }
+                    put("ts", e.ts)
+                }
+            }))
+        }
+    }
+
     @Synchronized
     override fun verifyChain(): Boolean {
         var prev: String? = null
@@ -180,5 +215,6 @@ class Ledger(
         fun hashOf(prevHash: String, jobId: String, kind: String, ts: Long, entry: String): String =
             Hashing.sha256Hex("$prevHash\n$jobId\n$kind\n$ts\n$entry")
         private const val TAG = "Ledger"
+        private val JSON = Json { ignoreUnknownKeys = true }
     }
 }
