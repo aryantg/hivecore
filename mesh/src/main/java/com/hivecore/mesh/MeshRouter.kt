@@ -617,6 +617,7 @@ class MeshRouter(
                 }
                 MsgType.RECLAIM_RES -> if (MeshJson.decode<ReclaimResBody>(env.body).node != env.from) return drop(type, peer, "node != from")
                 MsgType.JOURNAL -> if (MeshJson.decode<JournalBody>(env.body).commander != env.from) return drop(type, peer, "commander != from")
+                MsgType.TASK_PROGRESS -> if (MeshJson.decode<com.hivecore.core.WorkerEvent>(env.body).node != env.from) return drop(type, peer, "node != from")
             }
         } catch (e: Exception) {
             return drop(type, peer, "body does not parse: ${e.message}")

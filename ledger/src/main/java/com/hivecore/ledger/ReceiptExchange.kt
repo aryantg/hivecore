@@ -35,6 +35,8 @@ class ReceiptExchange(
     private val localJobs = LinkedHashSet<String>()
     private val held = LinkedHashMap<String, MutableList<Pair<String, ReceiptBody>>>()   // key(jobId, target kind) -> (from, body)
     private var job: Job? = null
+    /** After a countersignature is stored: (jobId, the countersigning peer, the local entry kind it signed; null = any). */
+    var onCountersigned: (jobId: String, from: String, kind: String?) -> Unit = { _, _, _ -> }
 
     init { (ledger as? Ledger)?.peerKey = { router.pinnedKey(it) } }
 
@@ -122,6 +124,7 @@ class ReceiptExchange(
         if (known) {
             ledger.countersign(b.jobId, target, from, b.entryHash, b.sig ?: "")
             SLog.d(TAG, "stored receipt for ${b.jobId} from ${from.take(8)}")
+            countersigned(b.jobId, from, target)
         } else {
             synchronized(lock) {
                 held.getOrPut(k) { ArrayList() }.add(from to b)
@@ -129,6 +132,10 @@ class ReceiptExchange(
             }
             SLog.d(TAG, "holding receipt for ${b.jobId} from ${from.take(8)} until the local entry exists")
         }
+    }
+
+    private fun countersigned(jobId: String, from: String, kind: String?) {
+        try { onCountersigned(jobId, from, kind) } catch (e: Exception) { SLog.w(TAG, "onCountersigned: ${e.message}") }
     }
 
     /** Null when [b] is a countersignature by [from] that verifies with its pinned key; else the reason. */
@@ -161,6 +168,7 @@ class ReceiptExchange(
         for ((from, b) in list) {
             ledger.countersign(jobId, targetKind(b.kind), from, b.entryHash, b.sig ?: "")
             SLog.d(TAG, "stored held receipt for $jobId from ${from.take(8)}")
+            countersigned(jobId, from, targetKind(b.kind))
         }
     }
 

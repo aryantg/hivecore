@@ -9,6 +9,8 @@ import com.hivecore.core.LinkKind
 import com.hivecore.core.NodeLoad
 import com.hivecore.core.Profile
 import com.hivecore.core.SLog
+import com.hivecore.core.WorkerActivity
+import com.hivecore.core.WorkerEvent
 import com.hivecore.engine.workload.RecipeDef
 import com.hivecore.engine.workload.Recipes
 import com.hivecore.ui.Format
@@ -43,12 +45,19 @@ class JobsViewModel(
     private val io: CoroutineDispatcher = Dispatchers.IO,
     /** the merged result's hash when the runner exposes it (JobProgress carries none yet); null = unknown */
     private val resultHash: (JobProgress) -> String? = { null },
+    /** the worker timeline: this phone's chunks for other phones, and (mirrored) its workers' for its own jobs; null = none */
+    private val activity: WorkerActivity? = null,
+    private val selfId: String = "",
+    /** nodeId → display name (the orchestrator a card works for) */
+    private val nameOf: (String) -> String = { it.take(8) },
 ) {
     enum class Phase { IDLE, RUNNING, DONE, FAILED }
 
-    /** One phone's lane: its load plus how it is reached. */
-    data class PhoneLane(val load: NodeLoad, val link: LinkKind?) {
+    /** One phone's lane: its load, how it is reached, and its latest worker timeline event (model boot, chunk, sent back). */
+    data class PhoneLane(val load: NodeLoad, val link: LinkKind?, val activity: WorkerEvent? = null) {
         val linkWord: String get() = Format.linkWord(link)
+        val activityLine: String? get() = activity?.let { WorkerTimeline.phrase(it) }
+        val busy: Boolean get() = activity?.let { WorkerTimeline.busy(it) } == true
     }
 
     data class UiState(
@@ -69,6 +78,10 @@ class JobsViewModel(
         /** jobIds whose request this session knows (re-run is possible) */
         val rerunnable: Set<String> = emptySet(),
         val message: String? = null,
+        /** jobs this phone is working on (or just worked on) for other phones, most recent first */
+        val working: List<WorkerTimeline.WorkingFor> = emptyList(),
+        /** while this phone's job is placed and has no chunk grid yet: each worker's latest event (name, event) */
+        val preparing: List<Pair<String, WorkerEvent>> = emptyList(),
     ) {
         val selected: RecipeDef? get() = recipes.firstOrNull { it.id == selectedId }
         val canRun: Boolean get() = phase != Phase.RUNNING && selected?.let { r ->
@@ -95,6 +108,10 @@ class JobsViewModel(
     init {
         scope.launch { runner.jobs.collect { list -> _state.update { it.copy(history = list) } } }
         scope.launch { profiles.collect { _state.update { s -> s.copy(lanes = s.current?.let { lanes(it) } ?: emptyList()) } } }
+        activity?.let { a ->
+            scope.launch { a.local.collect { evs -> _state.update { it.copy(working = WorkerTimeline.build(evs, selfId, nameOf)) } } }
+            scope.launch { a.peers.collect { _ -> _state.update { s -> s.copy(lanes = s.current?.let { lanes(it) } ?: emptyList(), preparing = preparing(s)) } } }
+        }
     }
 
     fun loadRecipes() {
@@ -199,13 +216,24 @@ class JobsViewModel(
     fun dismissMessage() { _state.update { it.copy(message = null) } }
 
     private fun show(p: JobProgress, phase: Phase) {
-        _state.update { it.copy(current = p, phase = phase, lanes = lanes(p), resultHash = if (p.done) runCatching { resultHash(p) }.getOrNull() else null, rerunnable = requests.keys.toSet()) }
+        _state.update { it.copy(current = p, phase = phase, lanes = lanes(p), preparing = emptyList(), resultHash = if (p.done) runCatching { resultHash(p) }.getOrNull() else null, rerunnable = requests.keys.toSet()) }
     }
 
     private fun lanes(p: JobProgress): List<PhoneLane> {
         val ps = profiles.value
-        return p.nodes.map { n -> PhoneLane(n, ps.firstOrNull { it.nodeId == n.nodeId }?.link?.kind) }
+        val mirror = mirrorOf(p.jobId)
+        return p.nodes.map { n -> PhoneLane(n, ps.firstOrNull { it.nodeId == n.nodeId }?.link?.kind, mirror[n.nodeId]) }
     }
+
+    /** The workers' latest events for [jobId] (a recipe stage "<job>/<stage>" matches its job). */
+    private fun mirrorOf(jobId: String): Map<String, WorkerEvent> {
+        val root = jobId.substringBefore('/')
+        return activity?.peers?.value.orEmpty().filterValues { it.jobId.substringBefore('/') == root }
+    }
+
+    private fun preparing(s: UiState): List<Pair<String, WorkerEvent>> =
+        if (!s.running || s.current != null) emptyList()
+        else activity?.peers?.value.orEmpty().values.sortedBy { it.node }.map { (if (it.node == selfId) "This phone" else nameOf(it.node)) to it }
 
     companion object {
         private const val TAG = "JobsVM"

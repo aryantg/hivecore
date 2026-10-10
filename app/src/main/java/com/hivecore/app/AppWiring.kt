@@ -411,6 +411,12 @@ object AppWiring {
 
         // ---- the swarm node (phases 3-5, 7) ----
         val receipts = ReceiptExchange(router, ledger, clock)
+        // the worker timeline on the Jobs screen: this phone's chunks for others, and its workers' chunks mirrored
+        val activity = com.hivecore.core.WorkerActivityLog()
+        receipts.onCountersigned = { jobId, from, kind ->
+            if (kind == com.hivecore.ledger.SplitLedger.KIND_TASK)
+                activity.emit(com.hivecore.core.WorkerEvent(jobId, com.hivecore.core.WorkerEventKind.RECEIPT_COUNTERSIGNED, selfId, from, clock()))
+        }
         val coordinators = ConcurrentHashMap<String, PlacementCoordinator>()
         val templates = runCatching { TemplateMatcher.load(app) }.getOrElse { warn("templates: ${it.message}"); TemplateMatcher.empty() }
         val intentPlanner = LlmIntentPlanner(llm, templates, { role -> runCatching { FewShots.load(app, role) }.getOrDefault(emptyList()) }, clock = clock)
@@ -483,7 +489,10 @@ object AppWiring {
             node.taskAuthoriser = { body, from -> if (from == selfId) null else authoriser.authorise(body, from) }
             authoriser.onWarning = { peer, n -> warn("${router.peerName(peer) ?: peer.take(8)} sent $n unauthorised tasks in a minute") }
         }
-        if (Features.runtime && pool is CapabilityPool) node.onModelReq = ModelReqHandler(selfId, { catalog }, pool, scope, cooldowns) { graph.policy.optIn.value }::handle
+        node.attachActivity(activity)
+        if (Features.runtime) node.modelChoice = { t -> modelChoice(t, catalog, pool, llm) }
+        if (Features.runtime && pool is CapabilityPool) node.onModelReq = ModelReqHandler(selfId, { catalog }, pool, scope, cooldowns,
+            acceptWork = { graph.policy.optIn.value }, activity = activity, clock = clock)::handle
         node.onModelReply = { t, from, body -> coordinators.values.forEach { pc -> scope.launch { pc.onMessage(t, from, body) } } }
         if (Features.runtime && Features.split) node.placeFor = { job, planId -> placeJob(job, planId, selfId, catalog, cooldowns, node, journal, coordinators, scope) }
         node.onSignal = { body, _ -> webrtc?.let { w -> scope.launch { w.handleSignal(body) } } }
@@ -563,7 +572,27 @@ object AppWiring {
         SLog.d(TAG, "wired in ${System.currentTimeMillis() - t0} ms: node ${selfId.take(8)} (${selfName()}), transports ${transports.keys} (always-on $alwaysOn), features ${Features.enabled()}")
         return HiveCoreGraph.Ports(selfId, askPort, jobRunner, swarmPort, graph.policy, modelsPort, registry, pool, store, store,
             if (Features.graph) dataPort else FakeDataPort(), settingsPort, consent, loadRecipes = recipes,
-            approval = approval.takeIf { Features.meshTrust }, approvalKeys = approvalKeys, rebroadcastHello = { router.rebroadcastHello() })
+            approval = approval.takeIf { Features.meshTrust }, approvalKeys = approvalKeys, rebroadcastHello = { router.rebroadcastHello() },
+            workerActivity = activity)
+    }
+
+    /**
+     * The worker timeline's "which model for this task type": the model the task names, else the LLM GenieX holds for
+     * `llm.*` ops (LlmMapExecutor runs on it), else the catalog's preferred build for the op's capability.
+     */
+    private fun modelChoice(t: com.hivecore.core.TaskSpec, catalog: ModelCatalog, pool: ModelPool, llm: LlmEngine): SwarmNode.ModelChoice? {
+        val cap = com.hivecore.core.OpRegistry[t.op].capability ?: return null
+        val named = t.modelId ?: (t.params["modelId"] as? JsonPrimitive)?.content
+        val backend = llm.backend.value
+        val id = named ?: if (cap.startsWith("llm.") && backend != null) (if (backend == LlmBackend.NPU) ModelPoolImpl.LLM_QAIRT_ID else ModelPoolImpl.LLM_GGUF_ID)
+            else catalog.preferred(cap)?.modelId
+        val warm = when {
+            id == null -> null
+            cap.startsWith("llm.") && named == null -> backend != null
+            pool is CapabilityPool -> id in pool.warm()
+            else -> id in pool.warm.value
+        }
+        return SwarmNode.ModelChoice(cap, id, when { named != null -> "requested"; id != null -> "preferred"; else -> "built-in" }, warm)
     }
 
     private const val GUEST = "relay-guest"

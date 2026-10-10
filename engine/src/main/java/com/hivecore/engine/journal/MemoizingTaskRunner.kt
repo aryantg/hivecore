@@ -40,6 +40,7 @@ class MemoizingTaskRunner(
         if (chunkId != null) {
             lookup(chunkId)?.let { hit ->
                 hits++
+                com.hivecore.core.WorkerTaskContext.current()?.emit(com.hivecore.core.WorkerEventKind.CHUNK_MEMO_HIT)
                 return Result.success(hit.outputJson)
             }
             if (memoOnly(task)) return Result.failure(IllegalStateException(NOT_MEMOIZED))

@@ -105,8 +105,14 @@ class ModelPoolImpl(
         val bytes = sizeOf(m, dir)
         if (bytes > budgetBytes) throw IllegalStateException("${m.id} needs ${bytes / MB} MB, over the ${budgetBytes / MB} MB budget")
         evictFor(bytes)
-        verify(m).getOrThrow()
-        val session = runtime.load(m, dir).getOrThrow()
+        val task = com.hivecore.core.WorkerTaskContext.current()
+        task?.emit(com.hivecore.core.WorkerEventKind.MODEL_LOADING, modelId = m.id)
+        val t0 = nanoTime()
+        val session = try { verify(m).getOrThrow(); runtime.load(m, dir).getOrThrow() } catch (t: Throwable) {
+            task?.emit(com.hivecore.core.WorkerEventKind.MODEL_FAILED, modelId = m.id, error = t.message ?: t.javaClass.simpleName)
+            throw t
+        }
+        task?.emit(com.hivecore.core.WorkerEventKind.MODEL_READY, modelId = m.id, warm = false, loadMs = (nanoTime() - t0) / 1_000_000)
         val e = Entry(m, runtime, session, bytes).also { it.users = 1 }
         synchronized(small) { small[m.id] = e }
         publishWarm()
@@ -243,7 +249,16 @@ class ModelPoolImpl(
     }
 
     private suspend fun <T> withVlm(m: ModelManifest, block: suspend (ModelSession) -> T): Result<T> = bigLock.withLock {
-        if (vlm == null) claimVlm().onFailure { return@withLock Result.failure(it) }
+        if (vlm == null) {
+            val task = com.hivecore.core.WorkerTaskContext.current()
+            task?.emit(com.hivecore.core.WorkerEventKind.MODEL_LOADING, modelId = m.id)
+            val t0 = nanoTime()
+            claimVlm().onFailure {
+                task?.emit(com.hivecore.core.WorkerEventKind.MODEL_FAILED, modelId = m.id, error = it.message ?: it.javaClass.simpleName)
+                return@withLock Result.failure(it)
+            }
+            task?.emit(com.hivecore.core.WorkerEventKind.MODEL_READY, modelId = m.id, warm = false, loadMs = (nanoTime() - t0) / 1_000_000)
+        }
         val s = vlm!!.second
         if (s.manifest.id != m.id) return@withLock Result.failure(IllegalStateException("big slot holds ${s.manifest.id}, not ${m.id}"))
         runCatching { block(s) }
