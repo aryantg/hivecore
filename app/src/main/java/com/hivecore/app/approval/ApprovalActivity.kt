@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.view.WindowManager
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -97,6 +98,7 @@ class ApprovalActivity : FragmentActivity() {
     private val controller by lazy { store?.let { PlanApprovalController(it) } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         jobId = intent?.getStringExtra(EXTRA_JOB_ID)
         SLog.d(TAG, "onCreate jobId=${jobId?.take(8)} store=${store != null}")

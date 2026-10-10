@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The brand mark: a slate hexagon on honey amber. Compose screens read their colours from ui/design. -->
+    <color name="hive_amber">#F5B544</color>
+    <color name="hive_ink">#1E2228</color>
+    <color name="hive_window">#FBF8F3</color>
+</resources>

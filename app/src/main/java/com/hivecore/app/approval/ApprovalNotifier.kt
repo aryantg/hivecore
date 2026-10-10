@@ -64,7 +64,7 @@ class ApprovalNotifier(context: Context) : ApprovalNotifying {
         val open = ApprovalActivity.intent(ctx, pending.jobId)
         val pi = PendingIntent.getActivity(ctx, idFor(pending.jobId), open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val builder = Notification.Builder(ctx, CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(com.hivecore.R.drawable.ic_stat_hive)
             .setContentTitle("${pending.requester} asks for figures from this phone")
             .setContentText(pending.description.lineSequence().firstOrNull().orEmpty())
             .setStyle(Notification.BigTextStyle().bigText(pending.description))
