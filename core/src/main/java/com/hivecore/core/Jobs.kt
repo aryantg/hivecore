@@ -5,8 +5,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 
-// Swarm plan §4B.4 — the job/progress seam between the splitting engine (swarm/split, the producer) and the UI and
-// debug hooks (consumers). Frozen once merged: the splitter emits exactly these, the Jobs screen renders them.
+// Spec section 17 (Jobs screen) — the job/progress seam between the split engine (engine/split, the producer) and the
+// UI and debug hooks (consumers). Frozen once merged: the splitter emits exactly these, the Jobs screen renders them.
+// Phase 3 added, additively: per-chunk badges (duplicated, re-cut, verified, cloud), per-node link kind, the partial
+// reason and the resumable flag.
 
 /** A job to split across phones: a recipe over items, or one op over one large input. */
 @Serializable data class JobRequest(
@@ -17,7 +19,7 @@ import kotlinx.serialization.json.JsonObject
     val params: JsonObject = JsonObject(emptyMap()),
     /** local file paths of the items (photos, docs, audio, …) or empty for prompt/question jobs */
     val inputs: List<String> = emptyList(),
-    /** private mode (§7): when true, nothing leaves this phone; chunks run only here */
+    /** private mode: when true, nothing leaves this phone; chunks run only here */
     val private: Boolean = false,
 )
 
@@ -32,6 +34,15 @@ enum class ChunkState { QUEUED, RUNNING, DONE, DUPLICATED, FAILED }
     val ms: Long? = null,
     /** short human label, e.g. "invoices 41–60", "audio 02:30–03:00", "tile 3,2", "seed 7" */
     val label: String = "",
+    /** section 11.2 step 5: a straggler copy ran elsewhere */
+    val duplicated: Boolean = false,
+    /** section 14: halved into two child chunks (or, with [recutOf], is one of the halves) */
+    val recut: Boolean = false,
+    val recutOf: Int? = null,
+    /** section 12.1: true = two replicas agreed; false = one phone only ("not verified"); null = not a replicated op */
+    val verified: Boolean? = null,
+    /** section 15.3: a cloud model answered this chunk (the badge shows the slug) */
+    val cloud: String? = null,
 )
 
 @Serializable data class NodeLoad(
@@ -40,14 +51,16 @@ enum class ChunkState { QUEUED, RUNNING, DONE, DUPLICATED, FAILED }
     val chunksDone: Int,
     val busyMs: Long,
     val itemsPerSec: Double,
+    /** section 5.6 link kind the phone is reached over ("LAN", "P2P", "BT", "WAN_DIRECT", "WAN_RELAY"); null for this phone */
+    val link: String? = null,
 )
 
 @Serializable data class JobProgress(
     val jobId: String,
     val title: String,
-    /** "shard" | "chunk" | "fanout" | "pipeline" | "graph" (§4B.1) */
+    /** "shard" | "chunk" | "fanout" | "pipeline" | "graph" (section 10.2) */
     val axis: String,
-    /** "concat" | "stitch" | "tree" | "monoid" | "topk" | "vote" | "rank" (§4B.2) */
+    /** "concat" | "stitch" | "tree" | "monoid" | "topk" | "vote" | "rank" (section 10.4) */
     val merge: String,
     val chunks: List<ChunkView>,
     val nodes: List<NodeLoad>,
@@ -65,6 +78,15 @@ enum class ChunkState { QUEUED, RUNNING, DONE, DUPLICATED, FAILED }
     /** where the merged result landed: table name, folder path, or doc id */
     val resultRef: String? = null,
     val error: String? = null,
+    /** section 14: the job ended with failed chunks; [partialReason] is the one-sentence explanation */
+    val partial: Boolean = false,
+    val partialReason: String? = null,
+    /** section 13.1: journaled and offered for resume after a restart */
+    val resumable: Boolean = false,
+    /** section 15.3: cloud slugs that answered a chunk or the step (the cloud badge) */
+    val cloud: List<String> = emptyList(),
+    /** chunks accepted from a single phone ("not verified", section 12.1) */
+    val unverified: Int = 0,
 )
 
 interface JobRunner {

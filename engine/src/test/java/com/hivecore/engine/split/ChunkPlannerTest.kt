@@ -80,4 +80,68 @@ class ChunkPlannerTest {
         assertNull(Mergeability.of(Op.JOIN))
         assertEquals(MergeKind.MONOID, Mergeability.chunkKind(Op.AGG))
     }
+
+    // ------------------------------------------------------------------ spec 10.3 / 10.5 additions
+
+    @Test fun chunkIdsCarryTheModelHashAndTheCapabilityComesFromTheRegistry() {
+        val job = SplitJob("j", Op.OCR, empty, "ocr-v1", items(4), unitsPerChunk = 2)
+        assertEquals("ocr", job.cap)
+        assertEquals("llm.json", SplitJob("x", Op.FIELDS, empty, input = items(1)).cap)
+        assertEquals("vlm", SplitJob("x", Op.VLM_ASK, empty, input = items(1), capability = "vlm").cap)
+        val byId = ChunkPlanner().plan(job, emptyList(), "me").getOrThrow().chunks
+        val byHash = ChunkPlanner().plan(job.copy(modelSha256 = "abc123"), emptyList(), "me").getOrThrow().chunks
+        val sameHash = ChunkPlanner().plan(job.copy(modelId = "other", modelSha256 = "abc123"), emptyList(), "me").getOrThrow().chunks
+        assertNotEquals(byId.map { it.chunkId }, byHash.map { it.chunkId })
+        assertEquals(byHash.map { it.chunkId }, sameHash.map { it.chunkId })          // the build hash, not the id, names the model
+        assertEquals("OCR@abc123", job.copy(modelSha256 = "abc123").opKey)
+        assertEquals(2, ChunkPlanner().plan(SplitJob("l", Op.TEXT_CLASSIFY, empty, input = items(4)), emptyList(), "me").getOrThrow().replicas)
+        assertEquals(1, ChunkPlanner().plan(job, emptyList(), "me").getOrThrow().replicas)
+    }
+
+    @Test fun readySetFromPlacementDefinesTheEligiblePhones() {
+        val job = SplitJob("j", Op.IQA, empty, input = items(40))
+        val profiles = listOf(phone("a"), phone("b"), phone("c"), phone("me"))
+        val byProfile = ChunkPlanner().plan(job, profiles, "me").getOrThrow()
+        assertEquals(listOf("a", "b", "c", "me"), byProfile.eligible)
+        val ready = ChunkPlanner().plan(job, profiles, "me", ready = setOf("c")).getOrThrow()
+        assertEquals(listOf("c", "me"), ready.eligible)                        // MODEL_READY phones plus the orchestrator
+        assertTrue(ready.chunks.size >= 4 && byProfile.chunks.size >= 8)
+    }
+
+    @Test fun expectedMsFallsBackFromJobToProfileToCatalogToDefault() {
+        val job = SplitJob("j", Op.OCR, empty, "m", items(1000))
+        val profiles = listOf(phone("bench", 50.0), phone("plain"), phone("me"))
+        val p = ChunkPlanner().plan(job, profiles, "me", unitMsOf = { n, cap -> if (n == "plain" && cap == "ocr") 300.0 else null }).getOrThrow()
+        assertEquals(50.0, p.unitMs["bench"]!!, 0.0)                           // profile p50 for the model
+        assertEquals(300.0, p.unitMs["plain"]!!, 0.0)                          // catalog unitMsP50 for the capability
+        assertEquals(SplitConstants.UNIT_MS_OTHER, p.unitMs["me"]!!, 0.0)      // kind default
+        val pinned = ChunkPlanner().plan(job.copy(unitMs = 7.0), profiles, "me").getOrThrow()
+        assertTrue(pinned.unitMs.values.all { it == 7.0 })
+        assertEquals(SplitConstants.UNIT_MS_LLM, ChunkPlanner.defaultUnitMs(Op.SUMMARIZE, items(1)), 0.0)
+        assertEquals(SplitConstants.UNIT_MS_AUDIO_S, ChunkPlanner.defaultUnitMs(Op.ASR, SplitInput.Audio(1000)), 0.0)
+    }
+
+    @Test fun recutHalvesAtAUnitBoundaryWithTheIdsOfAFreshCut() {
+        val job = SplitJob("j", Op.EMBED, empty, "m", items(10), unitsPerChunk = 4)
+        val p = ChunkPlanner().plan(job, emptyList(), "me").getOrThrow()
+        val kids = p.recut(p.chunks[0], p.chunks.size)!!
+        assertEquals(listOf(3, 4), kids.map { it.index })
+        assertEquals(listOf(0, 0), kids.map { it.recutOf })
+        assertEquals(listOf(0L to 2L, 2L to 4L), kids.map { it.ownFrom to it.ownTo })
+        val fresh = ChunkPlanner().plan(job.copy(unitsPerChunk = 2), emptyList(), "me").getOrThrow().chunks
+        assertEquals(fresh.take(2).map { it.chunkId }, kids.map { it.chunkId })   // a memo hit for the half-size cut is a hit here too
+        assertNull(p.recut(p.chunks[2].copy(units = 1, ownTo = p.chunks[2].ownFrom + 1), 9))
+        // text keeps the overlap rule; audio halves at a second boundary; VAD segments and fan-outs are never re-cut
+        val text = ChunkPlanner().plan(SplitJob("t", Op.TEXT_CLASSIFY, empty, input = SplitInput.Text((1..8).joinToString(" ") { "Sentence $it." }), unitsPerChunk = 4), emptyList(), "me").getOrThrow()
+        val tk = text.recut(text.chunks[1], 2)!!
+        assertEquals(listOf(1L, 1L), tk.map { it.overlapBefore })
+        assertEquals(listOf(4L to 6L, 6L to 8L), tk.map { it.ownFrom to it.ownTo })
+        val audio = ChunkPlanner().plan(SplitJob("a", Op.ASR, empty, input = SplitInput.Audio(20_000, "rec")), emptyList(), "me").getOrThrow()
+        assertEquals(listOf(0L to 10_000L, 10_000L to 20_000L), audio.chunks.map { it.ownFrom to it.ownTo })   // 2 chunks for 1 phone
+        assertEquals(listOf(0L to 5_000L, 5_000L to 10_000L), audio.recut(audio.chunks[0], 2)!!.map { it.ownFrom to it.ownTo })
+        val vad = ChunkPlanner().plan(SplitJob("v", Op.ASR, empty, input = SplitInput.Audio(20_000, "rec", segments = listOf(listOf(0L, 20_000L)))), emptyList(), "me").getOrThrow()
+        assertNull(vad.recut(vad.chunks[0], 1))
+        val fan = ChunkPlanner().plan(SplitJob("f", Op.TEXT_CLASSIFY, empty, input = SplitInput.FanOut(listOf(empty, empty))), emptyList(), "me").getOrThrow()
+        assertNull(fan.recut(fan.chunks[0], 2))
+    }
 }
