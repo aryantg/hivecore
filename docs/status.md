@@ -1,4 +1,4 @@
-# HiveCore: what `track/integrate` does today
+# HiveCore: what `main` does today
 
 Updated 2026-10-10 (phases 1-8 merged and wired behind their flags; the integration wave on top of the six tracks).
 
