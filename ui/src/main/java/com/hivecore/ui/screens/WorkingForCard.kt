@@ -1,34 +1,29 @@
 package com.hivecore.ui.screens
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.hivecore.core.WorkerEvent
+import com.hivecore.ui.design.Avatar
+import com.hivecore.ui.design.CardTone
+import com.hivecore.ui.design.HiveCard
+import com.hivecore.ui.design.HiveSpacing
+import com.hivecore.ui.design.StatusPill
+import com.hivecore.ui.design.StepItem
+import com.hivecore.ui.design.StepList
+import com.hivecore.ui.design.StepMark
+import com.hivecore.ui.design.Tone
 import com.hivecore.ui.vm.WorkerTimeline
 import com.hivecore.ui.vm.WorkerTimeline.StepState
 
@@ -38,68 +33,44 @@ import com.hivecore.ui.vm.WorkerTimeline.StepState
  */
 @Composable
 internal fun WorkingForCard(w: WorkerTimeline.WorkingFor) {
-    Card(Modifier.fillMaxWidth().animateContentSize(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Working for ${w.commanderName}", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                Badge(if (w.settled) "done" else "live", if (w.settled) Tone.OK else Tone.NEUTRAL)
+    HiveCard(Modifier.animateContentSize(), tone = CardTone.Tonal) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Avatar(w.commanderName)
+            Spacer(Modifier.width(HiveSpacing.md))
+            Column(Modifier.weight(1f)) {
+                Text("Working for ${w.commanderName}", style = MaterialTheme.typography.titleMedium)
+                Text(w.what, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text(w.what, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
-            Spacer(Modifier.height(8.dp))
-            w.steps.forEachIndexed { i, s -> StepRow(i + 1, s, last = i == w.steps.lastIndex) }
+            StatusPill(if (w.settled) "done" else "live", if (w.settled) Tone.Ok else Tone.Accent, dot = !w.settled)
         }
+        Spacer(Modifier.height(HiveSpacing.md))
+        StepList(w.steps.map { s -> StepItem(s.title, s.detail, mark = markOf(s.state)) })
     }
 }
 
-@Composable
-private fun StepRow(n: Int, s: WorkerTimeline.Step, last: Boolean) {
-    Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
-        contentDescription = "Step $n, ${s.title}: ${s.state.name.lowercase()}" + (s.detail?.let { ", $it" } ?: "")
-    }, verticalAlignment = Alignment.Top) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            AnimatedContent(targetState = s.state, label = "step-$n") { st -> StepDot(n, st) }
-            if (!last) Box(Modifier.width(2.dp).height(14.dp).background(MaterialTheme.colorScheme.outlineVariant))
-        }
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f).padding(top = 2.dp, bottom = if (last) 0.dp else 6.dp)) {
-            Text(s.title, style = MaterialTheme.typography.bodyMedium, fontWeight = if (s.state == StepState.ACTIVE) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (s.state == StepState.PENDING) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer)
-            s.detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
-    }
-}
-
-@Composable
-private fun StepDot(n: Int, st: StepState) {
-    val c = MaterialTheme.colorScheme
-    val (bg, fg, glyph) = when (st) {
-        StepState.DONE -> Triple(c.primary, c.onPrimary, "✓")
-        StepState.FAILED -> Triple(c.error, c.onError, "!")
-        StepState.SKIPPED -> Triple(c.surfaceVariant, c.onSurfaceVariant, "–")
-        StepState.ACTIVE -> Triple(Color.Transparent, c.primary, "")
-        StepState.PENDING -> Triple(c.surfaceVariant, c.onSurfaceVariant, n.toString())
-    }
-    Box(Modifier.size(22.dp).background(bg, CircleShape), contentAlignment = Alignment.Center) {
-        if (st == StepState.ACTIVE) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-        else Text(glyph, color = fg, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-    }
+private fun markOf(s: StepState): StepMark = when (s) {
+    StepState.PENDING -> StepMark.Number
+    StepState.ACTIVE -> StepMark.Active
+    StepState.DONE -> StepMark.Done
+    StepState.FAILED -> StepMark.Failed
+    StepState.SKIPPED -> StepMark.Skipped
 }
 
 /** On the orchestrator, before the chunk grid exists: each worker's latest event while placement boots models. */
 @Composable
 internal fun PreparingList(preparing: List<Pair<String, WorkerEvent>>) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(HiveSpacing.xs)) {
         preparing.forEach { (name, e) -> ActivityLine(name, WorkerTimeline.phrase(e), WorkerTimeline.busy(e)) }
     }
 }
 
-/** "⟳ booting qwen2.5-1.5b…" under a phone lane. */
+/** "booting qwen2.5-1.5b…" under a phone lane. */
 @Composable
 internal fun ActivityLine(who: String?, line: String, busy: Boolean) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        if (busy) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
+        if (busy) CircularProgressIndicator(Modifier.size(HiveSpacing.spinnerSm), strokeWidth = HiveSpacing.xxs)
         else Text("•", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(HiveSpacing.sm))
         Text((who?.let { "$it: " } ?: "") + line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
     }
 }

@@ -140,6 +140,9 @@ class SwarmViewModel(
 
     fun copyInvite() { (_state.value.pairing as? Pairing.ShowInvite)?.let { copyLink(it.invite.link); _state.update { s -> s.copy(message = "Invite link copied") } } }
 
+    /** Sends the invite on screen through the share sheet. */
+    fun shareInvite() { (_state.value.pairing as? Pairing.ShowInvite)?.let { shareLink(it.invite.link) } }
+
     /** Scan QR: the camera scanner when the build has one, else the paste-a-link sheet. */
     fun scan() {
         val s = openScanner

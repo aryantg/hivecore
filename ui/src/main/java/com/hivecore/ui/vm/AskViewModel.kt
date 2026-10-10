@@ -65,8 +65,13 @@ class AskViewModel(
         /** history ids whose step list is expanded */
         val expandedSteps: Set<Long> = emptySet(),
         val message: String? = null,
+        /** the request being planned or run: the user's latest chat bubble (the composer is already cleared) */
+        val inFlight: String? = null,
+        val suggestions: List<Suggestion> = AskSuggestions.DEFAULT,
     ) {
         val busy: Boolean get() = phase is Phase.Planning || phase is Phase.Running
+        /** The conversation, oldest first (the chat Home renders it). */
+        val thread: List<ChatTurn> get() = ChatThread.of(this)
         /** The plan panel to show: the choice, or the running plan. */
         val panel: PlanOptions.Ready? get() = when (val p = phase) { is Phase.Choosing -> p.options; is Phase.Running -> p.options; else -> null }
     }
@@ -76,6 +81,9 @@ class AskViewModel(
 
     /** Opens the Jobs screen on a job (set by the app's navigation). */
     var openJob: (String) -> Unit = { SLog.w(TAG, "openJob not wired: $it") }
+
+    /** Opens the Jobs screen with a recipe selected (a suggestion that needs files, set by the app's navigation). */
+    var openRecipe: (String) -> Unit = { SLog.w(TAG, "openRecipe not wired: $it") }
 
     private var job: Job? = null
     private var nextId = 1L
@@ -92,7 +100,7 @@ class AskViewModel(
         if (_state.value.busy) return
         refreshPolicy()
         job?.cancel()
-        _state.update { it.copy(phase = Phase.Planning, message = null) }
+        _state.update { it.copy(phase = Phase.Planning, message = null, inFlight = q, request = "") }
         SLog.d(TAG, "plan: $q")
         job = scope.launch {
             val options = try { port.plan(q) } catch (e: CancellationException) { throw e } catch (e: Exception) {
@@ -131,12 +139,32 @@ class AskViewModel(
 
     fun cancel() {
         job?.cancel(); job = null
-        _state.update { if (it.busy || it.phase is Phase.Choosing || it.phase is Phase.Clarifying) it.copy(phase = Phase.Idle) else it }
+        _state.update {
+            if (it.busy || it.phase is Phase.Choosing || it.phase is Phase.Clarifying)
+                it.copy(phase = Phase.Idle, request = it.request.ifEmpty { it.inFlight.orEmpty() }, inFlight = null)
+            else it
+        }
     }
 
-    fun clearError() { _state.update { if (it.phase is Phase.Error) it.copy(phase = Phase.Idle) else it } }
+    fun clearError() { _state.update { if (it.phase is Phase.Error) it.copy(phase = Phase.Idle, request = it.request.ifEmpty { it.inFlight.orEmpty() }, inFlight = null) else it } }
     fun dismissMessage() { _state.update { it.copy(message = null) } }
-    fun clearHistory() { _state.update { it.copy(history = emptyList(), expandedSteps = emptySet()) } }
+
+    /** "New chat": clears the conversation (a plan or run in flight is cancelled first). */
+    fun clearHistory() {
+        if (_state.value.busy || _state.value.phase !is Phase.Idle) { job?.cancel(); job = null }
+        _state.update { it.copy(history = emptyList(), expandedSteps = emptySet(), phase = Phase.Idle, inFlight = null) }
+    }
+
+    /** A suggestion card or chip: asks it at once, or opens Jobs when it needs files. */
+    fun useSuggestion(s: Suggestion) {
+        when (s.kind) {
+            Suggestion.Kind.ASK -> { if (_state.value.busy) return; setRequest(s.request); submit() }
+            Suggestion.Kind.JOBS -> s.recipeId?.let { openRecipe(it) }
+        }
+    }
+
+    /** The composer's policy pill: the same setting as Settings' cloud policy. */
+    fun setPolicy(p: CloudPolicy) { prefs.putString(SettingsKeys.CLOUD_POLICY, p.key); _state.update { it.copy(policy = p) } }
     fun toggleSteps(id: Long) { _state.update { it.copy(expandedSteps = if (id in it.expandedSteps) it.expandedSteps - id else it.expandedSteps + id) } }
     fun openJob(item: HistoryItem) { item.answer?.jobId?.let { openJob(it) } }
 
@@ -192,7 +220,7 @@ class AskViewModel(
 
     private fun record(request: String, outcome: Outcome, mode: RunMode?) {
         val item = HistoryItem(nextId++, request, outcome, clock(), mode)
-        _state.update { it.copy(phase = Phase.Idle, request = "", history = listOf(item) + it.history) }
+        _state.update { it.copy(phase = Phase.Idle, inFlight = null, history = listOf(item) + it.history) }
         SLog.d(TAG, "done: ${outcome::class.simpleName}")
     }
 

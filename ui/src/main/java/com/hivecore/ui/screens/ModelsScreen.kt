@@ -1,32 +1,40 @@
 package com.hivecore.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.hivecore.ui.Screen
+import com.hivecore.ui.design.ActionRow
+import com.hivecore.ui.design.Avatar
+import com.hivecore.ui.design.Capability
+import com.hivecore.ui.design.HeaderAction
+import com.hivecore.ui.design.HiveAction
+import com.hivecore.ui.design.HiveCard
+import com.hivecore.ui.design.HiveCoreTheme
+import com.hivecore.ui.design.HiveIcons
+import com.hivecore.ui.design.HivePreviews
+import com.hivecore.ui.design.HiveScreen
+import com.hivecore.ui.design.HiveSpacing
+import com.hivecore.ui.design.HiveTextStyles
+import com.hivecore.ui.design.ListRow
+import com.hivecore.ui.design.Stat
+import com.hivecore.ui.design.StatusPill
+import com.hivecore.ui.design.Tone
+import com.hivecore.ui.design.error
+import com.hivecore.ui.design.loading
+import com.hivecore.ui.design.section
+import com.hivecore.ui.ports.PhoneModelState
+import com.hivecore.ui.ports.fakes.FakeModelsPort
 import com.hivecore.ui.vm.ModelsViewModel
 
 /** Models route: collects [ModelsViewModel] and reads the registry when the screen appears. */
@@ -35,6 +43,19 @@ fun ModelsRoute(vm: ModelsViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.refresh() }
     ModelsScreen(state, onDownload = vm::download, onLoad = vm::load, onUnload = vm::unload, onBench = vm::bench, onPin = vm::pin, onRetry = vm::refresh, onDismissMessage = vm::dismissMessage)
+}
+
+/** A capability's plain name and icon ("llm.json" → "Language"). */
+fun capabilityLabel(cap: String): Pair<String, ImageVector> = when (cap.substringBefore('.').lowercase()) {
+    "llm" -> "Language" to HiveIcons.ask
+    "vlm" -> "Vision and language" to HiveIcons.photo
+    "ocr" -> "Reading text (OCR)" to HiveIcons.document
+    "asr" -> "Speech to text" to HiveIcons.ask
+    "detect" -> "Object detection" to HiveIcons.scan
+    "embed" -> "Embeddings" to HiveIcons.data
+    "image", "gen_image", "sd" -> "Image generation" to HiveIcons.photo
+    "iqa" -> "Image quality" to HiveIcons.photo
+    else -> cap to HiveIcons.models
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -50,44 +71,69 @@ fun ModelsScreen(
     onDismissMessage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item("title") { ScreenTitle("Models", "${state.bigText} · warm: ${state.warm.ifEmpty { listOf("none") }.joinToString(", ")}") }
-        item("message") { MessageBar(state.message, onDismissMessage) }
-        state.error?.let { item("error") { ErrorState(it, onRetry) } }
-        if (state.loading && state.catalog.isEmpty()) item("loading") { LoadingRow("Reading the catalog…") }
-        if (!state.loading && state.catalog.isEmpty()) item("empty") { EmptyState("No catalog", "models/catalog.json ships with the runtime phase") }
-        state.groups.forEach { (capability, rows) ->
-            item("cap-$capability") { SectionTitle(capability) }
-            items(rows, key = { "m-" + it.id }) { r -> ModelRow(r, state.now, onDownload, onLoad, onUnload, onBench, onPin) }
+    val loadedHere = state.catalog.count { state.row(it).loadedHere }
+    HiveScreen(
+        Screen.MODELS, modifier,
+        capability = Capability(HiveIcons.models, "On-device AI", "Language, vision and reading models run on each phone's NPU. Nothing is sent to a server.",
+            Stat("$loadedHere of ${state.catalog.size}", "models loaded on this phone", if (loadedHere > 0) Tone.Ok else Tone.Neutral, HiveIcons.models),
+            tryPrompt = "Summarise the Q3 review deck"),
+        subtitle = "${state.bigText} · warm: ${state.warm.ifEmpty { listOf("none") }.joinToString(", ")}",
+        actions = { HeaderAction(HiveIcons.refresh, "Refresh", onClick = onRetry) },
+        message = state.message, onDismissMessage = onDismissMessage,
+    ) {
+        state.error?.let { error("error", it, onRetry) }
+        if (state.loading && state.catalog.isEmpty()) loading("loading", "Reading the catalog…")
+        if (!state.loading && state.catalog.isEmpty()) item("empty") {
+            com.hivecore.ui.design.EmptyState("No catalog", "models/catalog.json ships with the runtime phase", icon = HiveIcons.models)
         }
-        item("bottom") { Spacer(Modifier.height(24.dp)) }
+        state.groups.forEach { (capability, rows) ->
+            section(capabilityLabel(capability).first, key = "cap-$capability")
+            rows.forEach { r -> item("m-" + r.id) { ModelCard(r, state.now, onDownload, onLoad, onUnload, onBench, onPin) } }
+        }
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ModelRow(r: ModelsViewModel.Row, now: Long, onDownload: (String) -> Unit, onLoad: (String) -> Unit, onUnload: (String) -> Unit, onBench: (String) -> Unit, onPin: (String, String) -> Unit) {
-    Card(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(r.id, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                if (r.pinned) Badge("default", Tone.OK)
-                if (r.loadedHere) Badge("loaded", Tone.OK) else if (r.installedHere) Badge("installed", Tone.NEUTRAL) else Badge("available", Tone.NEUTRAL)
-            }
-            Text(r.specLine + " · " + r.sizeText, style = MaterialTheme.typography.bodySmall)
-            Text(r.hashText, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(4.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                r.chips.forEach { c -> Badge(c.label(now), if (c.loaded) Tone.OK else Tone.NEUTRAL) }
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                val busy = r.busy
-                if (!r.installedHere) TextButton(onClick = { onDownload(r.id) }, enabled = !busy) { Text("Download") }
-                if (r.installedHere && !r.loadedHere) TextButton(onClick = { onLoad(r.id) }, enabled = !busy) { Text("Load") }
-                if (r.loadedHere) TextButton(onClick = { onUnload(r.id) }, enabled = !busy) { Text("Unload") }
-                if (r.installedHere) TextButton(onClick = { onBench(r.id) }, enabled = !busy) { Text(if (busy) "Working…" else "BENCH") }
-                if (!r.pinned) TextButton(onClick = { onPin(r.entry.capability, r.id) }, enabled = !busy) { Text("Pin as default") }
-            }
+private fun ModelCard(r: ModelsViewModel.Row, now: Long, onDownload: (String) -> Unit, onLoad: (String) -> Unit, onUnload: (String) -> Unit, onBench: (String) -> Unit, onPin: (String, String) -> Unit) {
+    HiveCard(semantics = {}) {
+        ListRow(
+            r.id, supporting = r.specLine + " · " + r.sizeText,
+            leading = { Avatar(r.id, tone = if (r.loadedHere) Tone.Ok else Tone.Neutral, icon = capabilityLabel(r.entry.capability).second) },
+            trailing = {
+                when {
+                    r.loadedHere -> StatusPill("loaded", Tone.Ok, dot = true)
+                    r.installedHere -> StatusPill("installed", Tone.Neutral)
+                    else -> StatusPill("available", Tone.Neutral, icon = HiveIcons.download)
+                }
+            },
+        )
+        Text(r.hashText, style = HiveTextStyles.monoSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(HiveSpacing.sm))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(HiveSpacing.xs), verticalArrangement = Arrangement.spacedBy(HiveSpacing.xs)) {
+            if (r.pinned) StatusPill("default", Tone.Accent, icon = HiveIcons.check)
+            r.chips.forEach { c -> StatusPill(c.label(now), if (c.loaded) Tone.Ok else Tone.Neutral, dot = c.loaded) }
         }
+        Spacer(Modifier.height(HiveSpacing.sm))
+        val busy = r.busy
+        val primary = when {
+            r.loadedHere -> HiveAction("Unload", HiveIcons.stop, enabled = !busy) { onUnload(r.id) }
+            r.installedHere -> HiveAction(if (busy) "Working…" else "Load", HiveIcons.play, enabled = !busy) { onLoad(r.id) }
+            else -> HiveAction(if (busy) "Working…" else "Download", HiveIcons.download, enabled = !busy) { onDownload(r.id) }
+        }
+        ActionRow(primary, listOfNotNull(
+            if (r.installedHere) HiveAction(if (busy) "Working…" else "BENCH", HiveIcons.bolt, enabled = !busy) { onBench(r.id) } else null,
+            if (!r.pinned) HiveAction("Pin as default", HiveIcons.check, enabled = !busy) { onPin(r.entry.capability, r.id) } else null,
+        ))
     }
+}
+
+@HivePreviews
+@Composable
+private fun ModelsPreview() = HiveCoreTheme {
+    val now = 1_760_000_000_000L
+    ModelsScreen(ModelsViewModel.UiState(loading = false, catalog = FakeModelsPort.SAMPLE_CATALOG, installedHere = setOf("qwen3-4b-q4", "yolo11n"),
+        big = "qwen3-4b-q4", warm = listOf("yolo11n"), pinned = mapOf("llm.json" to "qwen3-4b-q4"), now = now,
+        phones = listOf(PhoneModelState("sales", "Sales", "qwen3-4b-q4", installed = true, loaded = true, benchP50Ms = 41.0, lastBenchTs = now - 86_400_000L))),
+        {}, {}, {}, {}, { _, _ -> }, {}, {})
 }

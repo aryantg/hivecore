@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,23 +16,23 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.hivecore.core.ChunkState
 import com.hivecore.core.ChunkView
-import com.hivecore.ui.HiveTheme
+import com.hivecore.ui.design.ChunkTone
+import com.hivecore.ui.design.HiveShape
+import com.hivecore.ui.design.HiveSpacing
+import com.hivecore.ui.design.HiveTextStyles
+import com.hivecore.ui.design.chunkColors
 import com.hivecore.ui.vm.JobFormat
 
 /**
@@ -39,14 +41,17 @@ import com.hivecore.ui.vm.JobFormat
  * and a thick border. Tapping a cell selects it and the line under the grid shows its label, phone and time.
  */
 @Composable
-fun ChunkGrid(chunks: List<ChunkView>, selected: Int?, onSelect: (Int?) -> Unit, modifier: Modifier = Modifier, cellSize: Dp = 30.dp) {
+fun ChunkGrid(
+    chunks: List<ChunkView>, selected: Int?, onSelect: (Int?) -> Unit, modifier: Modifier = Modifier,
+    cellSize: Dp = HiveSpacing.chunk, legend: Boolean = true, detailLine: Boolean = true,
+) {
     Column(modifier.fillMaxWidth()) {
         if (chunks.isEmpty()) {
             Text("Splitting the job into chunks…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             return@Column
         }
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val gap = 4.dp
+            val gap = HiveSpacing.chunkGap
             val perRow = ((maxWidth + gap) / (cellSize + gap)).toInt().coerceAtLeast(1)
             Column(verticalArrangement = Arrangement.spacedBy(gap)) {
                 chunks.chunked(perRow).forEach { row ->
@@ -56,65 +61,54 @@ fun ChunkGrid(chunks: List<ChunkView>, selected: Int?, onSelect: (Int?) -> Unit,
                 }
             }
         }
-        Spacer(Modifier.height(6.dp))
-        val sel = chunks.firstOrNull { it.index == selected }
-        if (sel != null) Text(JobFormat.chunkDetail(sel), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
-        else Text("Tap a chunk for its label, phone and time", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(4.dp))
-        ChunkLegend()
+        if (detailLine) {
+            Spacer(Modifier.height(HiveSpacing.sm))
+            val sel = chunks.firstOrNull { it.index == selected }
+            if (sel != null) Text(JobFormat.chunkDetail(sel), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+            else Text("Tap a chunk for its label, phone and time", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (legend) { Spacer(Modifier.height(HiveSpacing.xs)); ChunkLegend() }
     }
+}
+
+/** The chunk's colour role: cloud-run chunks that finished read as cloud, everything else by state. */
+fun toneOf(c: ChunkView): ChunkTone = if (JobFormat.isCloud(c) && c.state == ChunkState.DONE) ChunkTone.Cloud else when (c.state) {
+    ChunkState.QUEUED -> ChunkTone.Queued
+    ChunkState.RUNNING -> ChunkTone.Running
+    ChunkState.DONE -> ChunkTone.Done
+    ChunkState.DUPLICATED -> ChunkTone.Duplicated
+    ChunkState.FAILED -> ChunkTone.Failed
 }
 
 @Composable
 private fun ChunkCell(c: ChunkView, isSelected: Boolean, size: Dp, onClick: () -> Unit) {
-    val cloud = JobFormat.isCloud(c)
-    val (bg, fg) = if (cloud && c.state == ChunkState.DONE) HiveTheme.colors.cloudBadge to HiveTheme.colors.onCloudBadge else chunkColors(c.state)
-    val shape = RoundedCornerShape(6.dp)
-    val borderColor = when {
-        isSelected -> MaterialTheme.colorScheme.onSurface
-        c.state == ChunkState.DUPLICATED -> MaterialTheme.colorScheme.tertiary
-        else -> Color.Transparent
-    }
+    val (bg, fg) = chunkColors(toneOf(c))
+    val shape = HiveShape.chunk
+    var m = Modifier.size(size).background(bg, shape)
+    if (isSelected) m = m.border(HiveSpacing.borderSelected, MaterialTheme.colorScheme.onSurface, shape)
+    else if (c.state == ChunkState.DUPLICATED) m = m.border(HiveSpacing.borderSelected, MaterialTheme.colorScheme.tertiary, shape)
     Box(
-        Modifier.size(size).background(bg, shape)
-            .border(if (isSelected || c.state == ChunkState.DUPLICATED) 2.dp else 0.dp, borderColor, shape)
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = JobFormat.chunkDetail(c) },
+        m.clickable(role = Role.Button, onClick = onClick).semantics { contentDescription = JobFormat.chunkDetail(c) },
         contentAlignment = Alignment.Center,
     ) {
-        Text(JobFormat.initial(c.node), color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        if (c.state == ChunkState.DUPLICATED) Text("2", color = fg, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.TopEnd).padding(end = 2.dp))
-        if (c.state == ChunkState.FAILED) Text("!", color = fg, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.TopEnd).padding(end = 3.dp))
+        Text(JobFormat.initial(c.node), color = fg, style = HiveTextStyles.chunkInitial)
+        if (c.state == ChunkState.DUPLICATED) Text("2", color = fg, style = HiveTextStyles.chunkMark, modifier = Modifier.align(Alignment.TopEnd).padding(end = HiveSpacing.xxs, top = HiveSpacing.xxs))
+        if (c.state == ChunkState.FAILED) Text("!", color = fg, style = HiveTextStyles.chunkBang, modifier = Modifier.align(Alignment.TopEnd).padding(end = HiveSpacing.xxs, top = HiveSpacing.xxs))
     }
 }
 
-@Composable
-fun chunkColors(state: ChunkState): Pair<Color, Color> {
-    val cs = MaterialTheme.colorScheme
-    val x = HiveTheme.colors
-    return when (state) {
-        ChunkState.QUEUED -> cs.surfaceVariant to cs.onSurfaceVariant
-        ChunkState.RUNNING -> cs.primaryContainer to cs.onPrimaryContainer
-        ChunkState.DONE -> x.okBadge to x.onOkBadge
-        ChunkState.DUPLICATED -> cs.tertiaryContainer to cs.onTertiaryContainer
-        ChunkState.FAILED -> cs.errorContainer to cs.onErrorContainer
-    }
-}
-
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChunkLegend() {
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.semantics(mergeDescendants = true) {}) {
-        listOf(ChunkState.QUEUED to "queued", ChunkState.RUNNING to "running", ChunkState.DONE to "done", ChunkState.DUPLICATED to "duplicated", ChunkState.FAILED to "failed").forEach { (s, label) ->
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(HiveSpacing.md), verticalArrangement = Arrangement.spacedBy(HiveSpacing.xxs),
+        modifier = Modifier.semantics(mergeDescendants = true) {}) {
+        listOf(ChunkTone.Queued to "queued", ChunkTone.Running to "running", ChunkTone.Done to "done", ChunkTone.Duplicated to "duplicated",
+            ChunkTone.Failed to "failed", ChunkTone.Cloud to "cloud").forEach { (t, label) ->
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(10.dp).background(chunkColors(s).first, RoundedCornerShape(2.dp)))
-                Spacer(Modifier.width(3.dp))
+                Box(Modifier.size(HiveSpacing.swatch).background(chunkColors(t).first, HiveShape.swatch))
+                Spacer(Modifier.width(HiveSpacing.xs))
                 Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(10.dp).background(HiveTheme.colors.cloudBadge, RoundedCornerShape(2.dp)))
-            Spacer(Modifier.width(3.dp))
-            Text("cloud", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

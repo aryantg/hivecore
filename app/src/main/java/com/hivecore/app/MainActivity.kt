@@ -4,10 +4,13 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import com.hivecore.app.approval.ApprovalBanner
 import com.hivecore.core.SLog
-import com.hivecore.ui.HiveCoreShell
 import com.hivecore.ui.ScreenRegistry
+import com.hivecore.ui.design.HiveCoreTheme
+import com.hivecore.ui.shell.HiveCoreShell
+import com.hivecore.ui.shell.rememberHiveNav
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -32,16 +35,23 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val graph = HiveCoreGraph.get(this)
         if (savedInstanceState == null) requestRuntimePermissions()
         setContent {
-            androidx.compose.foundation.layout.Box {
-                HiveCoreShell(registry = ScreenRegistry(Features.screens(graph)))
-                // spec 17: the pending-approval card is the fallback when the notification does not surface
-                graph.ports.approval?.let { androidx.compose.foundation.layout.Column { ApprovalBanner(it, this@MainActivity) } }
+            HiveCoreTheme {
+                val nav = rememberHiveNav()
+                HiveCoreShell(
+                    registry = ScreenRegistry(Features.screens(graph)),
+                    nav = nav,
+                    status = Features.shellStatus(graph),
+                    // spec 17: the pending-approval card is the fallback when the notification does not surface
+                    banner = { graph.ports.approval?.let { ApprovalBanner(it, this@MainActivity) } },
+                    onTryInChat = { prompt -> graph.ask.setRequest(prompt) },
+                )
+                graph.consent?.let { ConsentSheetHost(it) }
             }
-            graph.consent?.let { ConsentSheetHost(it) }
         }
         handleInvite(intent, graph)
     }
