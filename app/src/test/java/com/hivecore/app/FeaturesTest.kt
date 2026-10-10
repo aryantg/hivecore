@@ -21,6 +21,23 @@ class FeaturesTest {
         assertEquals(Screen.entries.toSet(), Features.screensFor(listOf("mesh", "runtime", "split", "graph", "cloud")))
     }
 
+    /** Every flag combination: the graph builds, and every screen that combination makes real has a view model behind it. */
+    @Test fun graphBuildsTheScreensOfEveryFlagCombination() = runTest {
+        val all = listOf("mesh", "runtime", "split", "graph", "cloud", "remote", "state", "hardening")
+        for (mask in 0 until (1 shl all.size)) {
+            val flags = all.filterIndexed { i, _ -> mask and (1 shl i) != 0 }
+            val g = HiveCoreGraph.inMemory(backgroundScope, flags)
+            val screens = Features.screens(g, flags)
+            assertEquals(Features.screensFor(flags), screens.keys)
+            for (s in screens.keys) when (s) {
+                Screen.ASK -> g.ask; Screen.JOBS -> g.jobs; Screen.SWARM -> g.swarm
+                Screen.MODELS -> g.models; Screen.DATA -> g.data; Screen.SETTINGS -> g.settings
+            }
+            assertEquals("cloud" in flags, g.consent != null)
+            runCurrent()
+        }
+    }
+
     @Test fun graphBuildsEveryViewModelOverTheFakes() = runTest {
         val g = HiveCoreGraph.inMemory(backgroundScope)
         g.ask; g.jobs; g.swarm; g.models; g.data; g.settings

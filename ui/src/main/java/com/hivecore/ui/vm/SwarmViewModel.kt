@@ -99,6 +99,7 @@ class SwarmViewModel(
         scope.launch { port.peers.collect { refresh() } }
         scope.launch { port.sasPrompts.collect { s -> _state.update { it.copy(sas = s) } } }
         scope.launch { port.pendingJoins.collect { j -> _state.update { it.copy(pendingJoins = j) } } }
+        scope.launch { port.warnings.collect { w -> w.firstOrNull()?.let { line -> _state.update { it.copy(message = line) } } } }
         if (policy != null) {
             scope.launch { policy.profile.collect { refresh() } }
             scope.launch { policy.optIn.collect { o -> _state.update { it.copy(optIn = o) } } }

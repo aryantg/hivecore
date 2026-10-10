@@ -16,6 +16,7 @@ import com.hivecore.core.OpClass
 import com.hivecore.core.OpClasses
 import com.hivecore.core.PlanCompiler
 import com.hivecore.core.PlanSummary
+import com.hivecore.core.PlannedQuestion
 import com.hivecore.core.Planner
 import com.hivecore.core.Profile
 import com.hivecore.core.Provenance
@@ -69,6 +70,13 @@ import java.util.UUID
  * Memoization: `memoKey = sha256(canonical task + dataVersion(owner) + modelHash)`; a task whose verified result is
  * held is not sent again. The ledger gets a `plan` entry (planHash, assignment, profiles) and one `task` entry per
  * executed task.
+ *
+ * Escalation (spec 15.1, [EscalationThresholds]): a result that fails the step's `params.schema` is counted per phone
+ * and retried; three failures across two phones, a three-way replica disagreement, a VOTE below 0.6 or a local judge
+ * (VERIFY / EVAL) below 0.7 build an [EscalationRequest] with the step's inputs and privacy lineage ([Lineage]) and
+ * ask the [escalator]. A `Ran` outcome takes the step's place with executor `cloud:<slug>` (never memoized; the plan
+ * summary and the provenance show the slug); `Refused` / `Failed` refuse the plan with both reasons and nothing is
+ * re-dispatched. A private step never reaches the gate. [Escalator.Off] everywhere but the orchestrator wiring.
  */
 class Commander(
     private val selfId: String,
@@ -89,6 +97,8 @@ class Commander(
     private val clock: () -> Long = System::currentTimeMillis,
     private val approvalMs: Long = 65_000L,
     private val minDeadlineMs: Long = 4_000L,
+    private val escalator: Escalator = Escalator.Off,
+    private val schemaValidator: SchemaValidator = SchemaValidator.NONE,
 ) {
     // ------------------------------------------------------------------ inbound
 
@@ -128,12 +138,15 @@ class Commander(
 
     // ------------------------------------------------------------------ ask
 
-    /** Runs one composite question end to end; the last emission is [AskProgress.Done]. */
-    fun askComposite(question: String, route: RouteDecision, catalogs: List<Catalog>): Flow<AskProgress> = channelFlow {
+    /**
+     * Runs one composite question end to end; the last emission is [AskProgress.Done]. [planned] is a plan the tiered
+     * planner (spec 7.2) already produced for [question]; null plans it here with the T1 [planner].
+     */
+    fun askComposite(question: String, route: RouteDecision, catalogs: List<Catalog>, planned: PlannedQuestion? = null): Flow<AskProgress> = channelFlow {
         val t0 = clock()
         fun timing() = Timing(totalMs = clock() - t0)
         send(AskProgress.Status("Planning…"))
-        val planned = planner.plan(question, route, catalogs).getOrElse { e ->
+        val planned = planned ?: planner.plan(question, route, catalogs).getOrElse { e ->
             send(AskProgress.Done(AskOutcome.Refusal(listOf(selfName to (e.message ?: "this question cannot be planned")), timing())))
             return@channelFlow
         }
@@ -172,7 +185,8 @@ class Commander(
     private inner class TaskRun(val spec: TaskSpec) {
         val cls: OpClass = OpClasses.of(spec.op)
         var replicate: Boolean = (cls == OpClass.LLM || cls == OpClass.VLM) &&
-            (spec.params["replicate"] as? JsonPrimitive)?.content != "none"
+            (spec.params["replicate"] as? JsonPrimitive)?.content != "none" &&
+            ((spec.params["replicas"] as? JsonPrimitive)?.content?.toIntOrNull() ?: 2) > 1
         var output: JsonElement? = null
         val running = LinkedHashMap<String, Long>()          // node -> deadlineAt
         val tried = LinkedHashSet<String>()
@@ -183,6 +197,10 @@ class Commander(
         var memoKey: String? = null
         var fromMemo = false
         var dispatched = false
+        /** node -> results of this task that failed `params.schema` (spec 15.1) */
+        val schemaFails = LinkedHashMap<String, Int>()
+        /** the cloud slug that answered this step after an escalation (spec 15.3) */
+        var cloud: String? = null
         val done get() = output != null
     }
 
@@ -199,10 +217,15 @@ class Commander(
         val progress: suspend (AskProgress) -> Unit,
     ) {
         val tasks = LinkedHashMap<String, TaskRun>().also { m -> dag.tasks.forEach { m[it.id] = TaskRun(it) } }
+        /** privacy lineage per task (spec 15.2 step 3) */
+        val lineage: Map<String, String> = Lineage.lineages(dag.tasks)
         val consentPending = HashSet<String>()
         val notes = ArrayList<String>()
         var approvals = 0
         val costModel = SchedulerImpl()
+        /** phones that hold this PLAN (P10: every phone gets it before its first TASK, replicas and reassignments included) */
+        val planned = HashSet<String>()
+        val planBody: String by lazy { MeshJson.encode(PlanBody(planId, planHash, selfId, question, dag, assignment, clock(), UUID.randomUUID().toString())) }
 
         suspend fun execute(t0: Long): AskOutcome {
             // Memo hits first: a held verified result is not asked for again.
@@ -217,8 +240,7 @@ class Commander(
             val participants = tasks.values.filter { !it.done && it.cls != OpClass.REDUCE }.mapNotNull { assignment[it.spec.id] }.distinct()
             val others = participants.filter { it != selfId }
             if (others.isNotEmpty()) progress(AskProgress.Status("Asking ${others.joinToString(", ") { nameOf(it) }}…"))
-            val plan = MeshJson.encode(PlanBody(planId, planHash, selfId, question, dag, assignment, clock(), UUID.randomUUID().toString()))
-            for (p in participants) transmit(p, MsgType.PLAN, plan).onFailure { SLog.w(TAG, "PLAN to ${p.take(8)} not sent: ${it.message}") }
+            for (p in participants) sendPlan(p)
             try {
                 loop()
             } catch (f: Failed) {
@@ -248,6 +270,8 @@ class Commander(
                 for (t in tasks.values) {
                     if (t.done || t.dispatched) continue
                     if (t.spec.inputs.any { tasks[it]?.done != true }) continue
+                    // A step whose input is still being judged waits (the judge may replace that input, spec 15.1).
+                    if (!isJudge(t.spec) && t.spec.inputs.any { judgePending(it) }) continue
                     t.dispatched = true
                     progressed = true
                     if (t.cls == OpClass.REDUCE) reduce(t) else dispatchFirst(t)
@@ -268,6 +292,12 @@ class Commander(
             t.output = out; t.executors = listOf(selfId); t.ms = clock() - t1; t.verified = true
         }
 
+        private fun isJudge(spec: TaskSpec) = spec.op == Op.VERIFY || spec.op == Op.EVAL
+
+        /** A judge of [taskId] exists in the plan and has not finished. */
+        private fun judgePending(taskId: String): Boolean =
+            tasks.values.any { isJudge(it.spec) && it.spec.inputs.firstOrNull() == taskId && !it.done }
+
         private suspend fun dispatchFirst(t: TaskRun) {
             val primary = assignment[t.spec.id] ?: selfId
             dispatch(t, primary)
@@ -280,7 +310,13 @@ class Commander(
             }
         }
 
+        private suspend fun sendPlan(node: String) {
+            if (!planned.add(node)) return
+            transmit(node, MsgType.PLAN, planBody).onFailure { SLog.w(TAG, "PLAN to ${node.take(8)} not sent: ${it.message}"); planned.remove(node) }
+        }
+
         private suspend fun dispatch(t: TaskRun, node: String) {
+            sendPlan(node)
             t.tried += node
             t.running[node] = clock() + deadline(t, node)
             val inputs = t.spec.inputs.associateWith { tasks.getValue(it).output!! }
@@ -344,9 +380,13 @@ class Commander(
                     t.running.remove(node)
                     t.ms = maxOf(t.ms, b.ms)
                     if (t.spec.op == Op.AGG) invariants(t, node, out)
+                    val schema = t.spec.params[SchemaValidator.PARAM] as? JsonObject
+                    val schemaWhy = if (schema != null) schemaValidator.validate(out, schema) else null
+                    if (schemaWhy != null) { onSchemaFailure(t, node, schemaWhy); return }
                     if (!t.replicate) {
                         t.output = out; t.executors = listOf(node); t.verified = t.cls == OpClass.OWNER
                         remember(t)
+                        afterOutput(t)
                         return
                     }
                     t.results[node] = out
@@ -354,18 +394,101 @@ class Commander(
                         t.output = t.results.getValue(a); t.executors = listOf(a, c); t.verified = true
                         cancel(t, "verified")
                         remember(t)
+                        afterOutput(t)
                         return
                     }
                     if (t.running.isNotEmpty()) return
-                    if (t.results.size >= 3) {
+                    if (t.results.size >= EscalationThresholds.DISAGREEING_REPLICAS) {
                         SLog.w(TAG, "replicas disagree on ${t.spec.op} ${t.spec.id}: ${t.results.map { (n, o) -> "${nameOf(n)}=${Canon.hash(o).take(8)}" }}")
-                        throw Failed(listOf(selfName to "the phones disagree on ${t.spec.op.name.lowercase()} '${t.spec.id}', so no answer is given"))
+                        escalate(t, EscalationTrigger.VerificationFailed("${t.results.size} phones disagreed on ${t.spec.op} '${t.spec.id}'", t.results.size),
+                            "the phones disagree on ${t.spec.op.name.lowercase()} '${t.spec.id}'")
+                        return
                     }
                     val third = scheduler.reassign(t.spec, snapshot, selfId, t.tried)
                     if (third == null || third in t.tried)
                         throw Failed(listOf(selfName to "the phones disagree on ${t.spec.op.name.lowercase()} '${t.spec.id}' and no third phone can break the tie"))
                     dispatch(t, third)
                 }
+            }
+        }
+
+        /**
+         * Spec 15.1: a result that fails the step's schema is counted per phone and the step retried (an untried phone
+         * first, then the tried phone with the fewest failures); [EscalationThresholds.SCHEMA_ATTEMPTS] failures across
+         * [EscalationThresholds.SCHEMA_PHONES] phones escalate the step.
+         */
+        private suspend fun onSchemaFailure(t: TaskRun, node: String, why: String) {
+            t.schemaFails[node] = (t.schemaFails[node] ?: 0) + 1
+            val fails = t.schemaFails.values.sum()
+            val phones = t.schemaFails.size
+            SLog.w(TAG, "${t.spec.op} ${t.spec.id}: ${nameOf(node)} failed the schema ($fails/$phones): $why")
+            if (t.cls == OpClass.OWNER) throw Failed(listOf(nameOf(node) to "its figure for '${t.spec.id}' does not fit the expected shape ($why)"))
+            val local = "the answers for ${t.spec.op.name.lowercase()} '${t.spec.id}' failed the schema $fails times on $phones phone${if (phones == 1) "" else "s"}"
+            if (fails >= EscalationThresholds.SCHEMA_ATTEMPTS && phones >= EscalationThresholds.SCHEMA_PHONES) {
+                if (t.running.isNotEmpty()) cancel(t, "escalating")
+                escalate(t, EscalationTrigger.VerificationFailed("schema validation failed $fails times across $phones phones ($why)", fails), local)
+                return
+            }
+            if (fails >= EscalationThresholds.SCHEMA_ATTEMPTS) throw Failed(listOf(selfName to "$local, so no answer is given"))
+            if (t.running.isNotEmpty()) return     // a replica is still running; it may still fit
+            val next = scheduler.reassign(t.spec, snapshot, selfId, t.tried) ?: t.tried.minByOrNull { t.schemaFails[it] ?: 0 }
+                ?: throw Failed(listOf(selfName to "$local and no phone is left to retry"))
+            notes += "${t.spec.op} ${t.spec.id} retried on ${nameOf(next)} (schema: $why)"
+            dispatch(t, next)
+        }
+
+        /**
+         * The one path to the gate (spec 15.2, 15.3). A private step (lineage, or an owner op) is refused here without
+         * calling it. `Ran` makes the cloud output the step's result under executor `cloud:<slug>`; a refusal or a
+         * cloud failure ends the plan with the local reason and the gate's reason (a refused low-confidence vote keeps
+         * its local answer, marked not verified).
+         */
+        private suspend fun escalate(t: TaskRun, trigger: EscalationTrigger, localReason: String) {
+            val lin = lineage[t.spec.id] ?: Lineage.PUBLIC
+            if (lin == Lineage.PRIVATE || t.cls == OpClass.OWNER) {
+                if (trigger is EscalationTrigger.LowConfidence && t.output != null) {
+                    t.verified = false
+                    notes += "${t.spec.op} ${t.spec.id}: $localReason, and its data is private, so no cloud re-run"
+                    return
+                }
+                throw Failed(listOf(selfName to "$localReason, and its data is private, so no cloud re-run"))
+            }
+            val inputs = t.spec.inputs.associateWith { tasks[it]?.output ?: JsonNull }
+            val req = EscalationRequest(jobId = planId, planId = planId, commander = selfId, node = t.spec, inputs = inputs,
+                privacy = lin, trigger = trigger, localAttempts = maxOf(1, t.tried.size))
+            val g = try { escalator.tryEscalate(req) } catch (e: Exception) { GateOutcome.Failed(e.message ?: e.javaClass.simpleName) }
+            when (g) {
+                is GateOutcome.Ran -> {
+                    t.running.clear()
+                    t.output = g.output; t.executors = listOf(cloudExecutor(g.slug)); t.verified = true; t.cloud = g.slug
+                    notes += "${t.spec.op} ${t.spec.id}: ${g.slug} answered after $localReason"
+                    SLog.d(TAG, "${t.spec.op} ${t.spec.id} answered by cloud:${g.slug} (${trigger.name})")
+                }
+                is GateOutcome.Refused -> {
+                    if (trigger is EscalationTrigger.LowConfidence && t.output != null) {
+                        t.verified = false
+                        notes += "${t.spec.op} ${t.spec.id}: $localReason; no cloud re-run (${g.reason})"
+                    } else throw Failed(listOf(selfName to "$localReason; no cloud re-run (${g.reason})"))
+                }
+                is GateOutcome.Failed -> throw Failed(listOf(selfName to "$localReason; the cloud re-run failed (${g.reason})"))
+            }
+        }
+
+        /** After a step settled: a low VOTE confidence escalates it; a judge below the threshold escalates the judged step. */
+        private suspend fun afterOutput(t: TaskRun) {
+            val out = t.output as? JsonObject ?: return
+            if (t.cloud != null) return
+            val conf = (out["confidence"] as? JsonPrimitive)?.doubleOrNull
+            if (conf != null && out["votes"] != null && conf < EscalationThresholds.VOTE) {
+                escalate(t, EscalationTrigger.LowConfidence(conf), "the vote on '${t.spec.id}' is low (confidence $conf)")
+                return
+            }
+            if (isJudge(t.spec)) {
+                val score = (out["score"] as? JsonPrimitive)?.doubleOrNull ?: return
+                val judged = t.spec.inputs.firstOrNull()?.let { tasks[it] } ?: return
+                if (score < EscalationThresholds.JUDGE && judged.cloud == null)
+                    escalate(judged, EscalationTrigger.VerificationFailed("the local judge scored '${judged.spec.id}' $score, below ${EscalationThresholds.JUDGE}", maxOf(1, judged.tried.size)),
+                        "the local judge scored ${judged.spec.op.name.lowercase()} '${judged.spec.id}' $score")
             }
         }
 
@@ -478,6 +601,7 @@ class Commander(
                         put("outputHash", Canon.hash(out))
                         put("verifiedBy", JsonArray((if (t.verified && t.executors.size > 1) t.executors.drop(1) else emptyList()).map { JsonPrimitive(it) }))
                         put("memo", t.fromMemo)
+                        t.cloud?.let { put("source", cloudExecutor(it)) }
                     }
                     l.append(planId, "task", Canon.canonical(entry))
                 } catch (e: Exception) { SLog.e(TAG, "ledger task entry failed", e) }
@@ -499,12 +623,12 @@ class Commander(
             val inputsOfProducer = producer.spec.inputs.mapNotNull { id -> tasks[id]?.output?.let { runCatching { Canon.decodeTable(it) }.getOrNull() } }
             val text = PlanRenderer.render(producer.spec, out, inputsOfProducer, notes)
             val lines = tasks.values.map { r ->
-                val where = r.executors.joinToString("+") { if (it == selfId) "here" else nameOf(it) }.ifEmpty { "–" }
+                val where = r.executors.joinToString("+") { if (it == selfId) "here" else if (isCloud(it)) it else nameOf(it) }.ifEmpty { "–" }
                 val time = if (r.fromMemo) "memo" else PlanRenderer.seconds(r.ms)
                 "${r.spec.op} · $where · $time" + if (r.verified) " ✓" else ""
             }
             val provenance = provenance()
-            val phones = (tasks.values.flatMap { it.executors } + selfId).distinct().size
+            val phones = (tasks.values.flatMap { it.executors }.filter { !isCloud(it) } + selfId).distinct().size
             return AskOutcome.Answer(
                 text = text, tables = ownerTables, joined = finalTable, docAnswers = docs, chip = AnswerChip.PLAN,
                 provenance = provenance, timing = Timing(totalMs = clock() - t0), notes = notes.toList(),
@@ -522,7 +646,7 @@ class Commander(
             val byNode = LinkedHashMap<String, MutableList<TaskRun>>()
             for (t in tasks.values) for (n in t.executors) byNode.getOrPut(n) { ArrayList() } += t
             for ((node, ts) in byNode) {
-                val name = if (node == selfId) selfName else nameOf(node)
+                val name = if (node == selfId) selfName else if (isCloud(node)) node else nameOf(node)
                 val tables = ts.filter { it.spec.op == Op.AGG }.mapNotNull { r -> r.output?.let { runCatching { Canon.decodeTable(it) }.getOrNull() } }
                 val parts = ArrayList<String>()
                 if (tables.isNotEmpty()) {
@@ -541,6 +665,10 @@ class Commander(
     companion object {
         private const val TAG = "Commander"
         private const val MAX_MEMO = 500
+        private const val CLOUD_PREFIX = "cloud:"
+        /** The executor name of a cloud-answered step (spec 15.3 `source = cloud:<slug>`). */
+        fun cloudExecutor(slug: String) = CLOUD_PREFIX + slug
+        fun isCloud(executor: String) = executor.startsWith(CLOUD_PREFIX)
     }
 }
 

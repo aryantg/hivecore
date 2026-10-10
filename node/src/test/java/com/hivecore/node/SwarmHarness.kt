@@ -7,6 +7,15 @@ import com.hivecore.engine.split.SplitPlan
 import com.hivecore.engine.split.SplitCommander
 import com.hivecore.engine.AggExecutor
 import com.hivecore.engine.Commander
+import com.hivecore.engine.EscalationRequest
+import com.hivecore.engine.Escalator
+import com.hivecore.engine.GateOutcome
+import com.hivecore.engine.journal.ChunkMemo
+import com.hivecore.engine.journal.JobJournal
+import com.hivecore.engine.journal.MemoizingTaskRunner
+import com.hivecore.engine.journal.SqliteChunkMemo
+import com.hivecore.engine.journal.SqliteJobJournal
+import com.hivecore.core.TaskRunner
 import com.hivecore.engine.ComparatorImpl
 import com.hivecore.engine.OwnerPlanHandler
 import com.hivecore.engine.ProfileBeacon
@@ -36,6 +45,7 @@ import com.hivecore.core.RouteDecision
 import com.hivecore.core.Signer
 import com.hivecore.core.TaskSpec
 import com.hivecore.core.fakes.FakeBus
+import com.hivecore.core.fakes.FakeRelay
 import com.hivecore.core.fakes.FakeIntentPlanner
 import com.hivecore.core.fakes.FakeLedgerStore
 import com.hivecore.core.fakes.FakePlanner
@@ -51,6 +61,9 @@ import com.hivecore.mesh.HelloBody
 import com.hivecore.mesh.MeshRouter
 import com.hivecore.mesh.MsgType
 import com.hivecore.mesh.PeerStore
+import com.hivecore.mesh.FakeRelaySockets
+import com.hivecore.mesh.RelayClock
+import com.hivecore.mesh.RelayTransport
 import com.hivecore.mesh.Verified
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -86,6 +99,13 @@ class PlanGate(private val approvalSigner: Signer, private val nodeSigner: Signe
     }
 }
 
+/** The orchestrator's gate seam in the harness: tests swap [delegate] (default: cloud off) and read the requests. */
+class RoutedEscalator : Escalator {
+    var delegate: Escalator = Escalator.Off
+    val requests = ArrayList<EscalationRequest>()
+    override suspend fun tryEscalate(req: EscalationRequest): GateOutcome { requests += req; return delegate.tryEscalate(req) }
+}
+
 /** An EXTRACT-style executor returning a fixed output, counting its runs. */
 class ConstExecutor(var output: JsonElement, override val ops: Set<Op> = setOf(Op.EXTRACT)) : OpExecutor {
     var runs = 0
@@ -98,23 +118,33 @@ class ConstExecutor(var output: JsonElement, override val ops: Set<Op> = setOf(O
  * TaskRunnerImpl, ProfileBeacon, PlanCompilerImpl, SchedulerImpl, ReducerImpl, ComparatorImpl). The composite planner
  * is a [FakePlanner] scripted per test; the intent planner is the [FakeIntentPlanner]. Clocks are virtual.
  */
-class SwarmHarness(private val testScope: TestScope, private val debugRouters: Boolean = false, private val blobRoot: File? = null) {
+class SwarmHarness(private val testScope: TestScope, private val debugRouters: Boolean = false, private val blobRoot: File? = null,
+                   /** phase 7 wiring: a SQLite journal and chunk memo per phone, a MemoizingTaskRunner, the RECLAIM responder and resume driver */
+                   private val memoize: Boolean = false,
+                   /** phase 6 wiring: every phone also runs a relay transport over this fake relay (always-on beside the LAN fake); a `remote` phone has only the relay */
+                   val relay: FakeRelay? = null) {
     val base = 1_700_000_000_000L
     val now: () -> Long = { base + testScope.testScheduler.currentTime }
     val bus = FakeBus()
     val nodes = LinkedHashMap<String, Node>()
     private val scopes = ArrayList<CoroutineScope>()
 
-    companion object { const val COMMISSION_Q = "average commission by region" }
+    companion object { const val COMMISSION_Q = "average commission by region"; const val GROUP = "g1" }
 
     fun scope(): CoroutineScope =CoroutineScope(StandardTestDispatcher(testScope.testScheduler) + SupervisorJob()).also { scopes += it }
     fun close() { scopes.forEach { it.cancel() } }
 
-    inner class Node(val id: String, val name: String, val role: NodeRole, eligible: Boolean, val guardOverride: DifferencingGuard?) {
+    inner class Node(val id: String, val name: String, val role: NodeRole, eligible: Boolean, val guardOverride: DifferencingGuard?,
+                     /** a restarted phone: the same key and the same journal / memo database as the phone it replaces */
+                     signerOverride: FakeSigner? = null, stateDbOverride: JdbcSqlDb? = null,
+                     /** a phone in another city: reached through the relay only (spec 5.1 rank 5, WAN_RELAY) */
+                     val remote: Boolean = false) {
         val scope = scope()
-        val signer = FakeSigner()
+        val signer = signerOverride ?: FakeSigner()
         val approvalSigner = FakeSigner()
         val db = JdbcSqlDb.inMemory()
+        /** the journal and memo database (shared with the phone this one replaces after a restart) */
+        val stateDb: JdbcSqlDb = stateDbOverride ?: db
         val store: DataStore = DataFixtures.store(role, db)
         val intentPlanner = FakeIntentPlanner()
         val gate = PlanGate(approvalSigner, signer)
@@ -123,16 +153,26 @@ class SwarmHarness(private val testScope: TestScope, private val debugRouters: B
         val received = ArrayList<Verified>()
         val peerStore = PeerStore(db)
         val transport: FakeTransport = bus.node(id, name)
+        val relayTransport: RelayTransport? = relay?.let { r ->
+            RelayTransport("ws://relay.test/ws", signer, GROUP, { 1L }, scope, FakeRelaySockets(r), clock = RelayClock(now), localClock = now)
+        }
         val router = MeshRouter(
-            transports = mapOf("fake" to transport), signer = signer, peerStore = peerStore,
+            transports = buildMap { if (!remote) put("fake", transport); relayTransport?.let { put(RelayTransport.NAME, it) } },
+            signer = signer, peerStore = peerStore,
             localHello = { HelloBody("", name, "", approvalPubkey = approvalSigner.publicKeyB64, caps = listOf("sql", "npu")) },
-            scope = scope, now = now, debugAllowNodeSignedApprovals = debugRouters
+            scope = scope, now = now, debugAllowNodeSignedApprovals = debugRouters,
+            initialTransport = if (remote) RelayTransport.NAME else "fake",
+            alwaysOn = if (relayTransport != null && !remote) setOf(RelayTransport.NAME) else emptySet(),
         )
         val nodeId: String get() = router.nodeId
         val policy = FakeWorkerPolicy(Profile(router.nodeId, 0L, backend = LlmBackend.NPU, tokPerSec = 15.0, modelHash = "m1",
             idle = eligible, charging = true, batteryPct = 90, workerOptIn = eligible, eligible = eligible, big = "llm"))
         val guard: DifferencingGuard = guardOverride ?: SqlDifferencingGuard(db, RuleIntentCompiler(), now)
-        val runner = TaskRunnerImpl(router.nodeId)
+        val memo = SqliteChunkMemo(stateDb, now)
+        val journal = SqliteJobJournal(stateDb)
+        val escalator = RoutedEscalator()
+        val baseRunner = TaskRunnerImpl(router.nodeId)
+        val runner: TaskRunner = if (memoize) MemoizingTaskRunner(baseRunner, memo) else baseRunner
         val extract = ConstExecutor(JsonArray(listOf(JsonPrimitive("s1"), JsonPrimitive("s3"))))
         val swarm: SwarmNode = SwarmNode.build(
             router = MeshRouterAdapter(router), selfName = name, scope = scope, schema = store,
@@ -140,7 +180,9 @@ class SwarmHarness(private val testScope: TestScope, private val debugRouters: B
             approval = gate, guard = guard, planner = planner, planCompiler = PlanCompilerImpl(), policy = policy, ledger = ledger, runner = runner,
             extraExecutors = listOf(extract), blobDir = blobRoot?.let { File(it, id) },
             nameOf = { nid -> nodes.values.firstOrNull { it.nodeId == nid }?.name ?: nid.take(8) },
-            modelHash = { "m1" }, clock = now
+            modelHash = { "m1" }, clock = now, escalator = escalator,
+            journal = if (memoize) journal else JobJournal.None, memo = if (memoize) memo else ChunkMemo.None,
+            linkOf = { nid -> if (relay != null) router.linkTo(nid) else null },     // measured links only with the relay rig; the LAN tests set links in profiles
         )
 
         init { scope.launch { router.verified.collect { received += it } } }
@@ -150,8 +192,16 @@ class SwarmHarness(private val testScope: TestScope, private val debugRouters: B
         fun catalog(): Catalog = Catalog.of(nodeId, name, store.schema())
     }
 
-    fun node(id: String, name: String, role: NodeRole, eligible: Boolean = true, guard: DifferencingGuard? = null): Node =
-        Node(id, name, role, eligible, guard).also { nodes[id] = it }
+    fun node(id: String, name: String, role: NodeRole, eligible: Boolean = true, guard: DifferencingGuard? = null, remote: Boolean = false): Node =
+        Node(id, name, role, eligible, guard, remote = remote).also { nodes[id] = it }
+
+    /** The phone [old] after a force-stop and relaunch: same key, same journal and memo files, a fresh process (stack, scope, router). */
+    fun restart(old: Node): Node {
+        old.swarm.stop()
+        old.scope.cancel()
+        nodes.remove(old.id)
+        return Node(old.id, old.name, old.role, true, old.guardOverride, signerOverride = old.signer, stateDbOverride = old.stateDb).also { nodes[old.id] = it }
+    }
 
     fun hrSalesAccounts(eligible: Boolean = true): Triple<Node, Node, Node> =
         Triple(node("hr", "HR", NodeRole.HR, eligible), node("sales", "Sales", NodeRole.SALES, eligible), node("accounts", "Accounts", NodeRole.ACCOUNTS, eligible))
@@ -160,6 +210,7 @@ class SwarmHarness(private val testScope: TestScope, private val debugRouters: B
     suspend fun start(vararg skip: Node) {
         val all = nodes.values.toList()
         for (a in all) for (b in all) if (a !== b) a.pin(b)
+        relay?.roster(GROUP, 1, all.first().nodeId, all.map { FakeRelay.Member(it.nodeId, it.signer.publicKeyB64, it.name) })
         testScope.testScheduler.runCurrent()
         for (n in all) if (n !in skip) n.swarm.start(periodicProfiles = false)
         testScope.testScheduler.runCurrent()

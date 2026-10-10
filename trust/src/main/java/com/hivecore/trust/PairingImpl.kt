@@ -45,6 +45,10 @@ sealed class PairingEvent {
  * @param router    the mesh router: its session layers carry the control frames and expose the session once pinned
  * @param locate    where the joiner finds the inviter: nodeId (and the invite) → an endpoint on the selected
  *                  transport, e.g. the LAN peer whose service name carries the inviter's nodeId prefix
+ * @param remote    the remote leg (spec 6.2 invite link over the relay) when [locate] finds nothing: builds the
+ *                  guest relay transport (`RelayPairingChannel.joiner`), registers its session layer under
+ *                  [guestSecure] and returns the inviter's endpoint on it; null = LAN / Nearby only
+ * @param guestSecure the session layer of a transport outside the router by endpoint transport name (the guest leg)
  * @param onPaired  (nodeId, pubkey, name, groupId) after both confirmed; the roster admin adds the member here
  */
 class PairingImpl(
@@ -57,7 +61,12 @@ class PairingImpl(
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val random: SecureRandom = SecureRandom(),
     private val replyTimeoutMs: Long = 15_000L,
+    private val remote: (suspend (Invite) -> PeerEndpoint?)? = null,
+    private val guestSecure: (String) -> SecureTransport? = { null },
 ) : Pairing, SessionListener {
+
+    /** The session layer an endpoint's transport name resolves to: the router's, else a guest leg's. */
+    private fun secureFor(transport: String): SecureTransport? = router.secure(transport) ?: guestSecure(transport)
 
     val nodeId: String = Wire.nodeIdOf(signer.publicKeyB64) ?: error("signer public key is not base64")
     var onPaired: (nodeId: String, pubkey: String, name: String, groupId: String) -> Unit = { _, _, _, _ -> }
@@ -109,8 +118,8 @@ class PairingImpl(
         peerStore.get(inviterId)?.let { if (it.pubkey == invite.pubkey) return Result.failure(IllegalStateException("already paired with ${it.name}")) }
         synchronized(lock) { expecting[inviterId] = invite }
         try {
-            val ep = locate(inviterId, invite) ?: return Result.failure(IllegalStateException("the inviting phone is not reachable"))
-            val secure = router.secure(ep.transport) ?: return Result.failure(IllegalStateException("no transport ${ep.transport}"))
+            val ep = locate(inviterId, invite) ?: remote?.invoke(invite) ?: return Result.failure(IllegalStateException("the inviting phone is not reachable"))
+            val secure = secureFor(ep.transport) ?: return Result.failure(IllegalStateException("no transport ${ep.transport}"))
             val session = try { secure.open(ep) } catch (e: Exception) { return Result.failure(SecurityException("handshake failed: ${e.message}")) }
             if (session.peerNodeId != inviterId || session.peerPubkey != invite.pubkey) {
                 secure.disconnect(ep)
@@ -135,7 +144,7 @@ class PairingImpl(
 
     override suspend fun confirm(prompt: SasPrompt, matches: Boolean): Result<Unit> {
         val p = synchronized(lock) { pending[prompt.handshakeId] } ?: return Result.failure(IllegalStateException("no pairing in progress for ${prompt.peerName}"))
-        val secure = router.secure(p.session.endpoint.transport) ?: return Result.failure(IllegalStateException("no transport"))
+        val secure = secureFor(p.session.endpoint.transport) ?: return Result.failure(IllegalStateException("no transport"))
         if (!matches) {
             secure.sendControl(p.session, encode(PairingMsg(PairingMsg.ABORT, reason = "SAS mismatch")))
             abort(p, "SAS mismatch")
@@ -189,7 +198,7 @@ class PairingImpl(
     // ------------------------------------------------------------------ inviter side
 
     private suspend fun onJoin(session: Session, msg: PairingMsg) {
-        val secure = router.secure(session.endpoint.transport) ?: return
+        val secure = secureFor(session.endpoint.transport) ?: return
         val token = msg.token ?: ""
         val invite = synchronized(lock) { pruneInvites(); invites[token] }
         val why = when {
@@ -237,7 +246,7 @@ class PairingImpl(
     private fun abort(p: Pend, reason: String, disconnect: Boolean = true) {
         synchronized(lock) { if (pending.remove(p.prompt.handshakeId) == null) return }
         SLog.w(TAG, "pairing with ${p.prompt.peerName} aborted: $reason (no key stored)")
-        if (disconnect) router.secure(p.session.endpoint.transport)?.disconnect(p.session.endpoint)
+        if (disconnect) secureFor(p.session.endpoint.transport)?.disconnect(p.session.endpoint)
         eventsFlow.tryEmit(PairingEvent.Aborted(p.session.peerNodeId, reason))
     }
 

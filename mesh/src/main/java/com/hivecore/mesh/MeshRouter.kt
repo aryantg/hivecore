@@ -50,6 +50,8 @@ interface Disconnectable { fun disconnect(endpoint: PeerEndpoint) }
  * pairing mode is on, with digits = [Wire.pairingDigits] over the two HELLO keys; [accept] then pins that key.
  *
  * @param transports            selectable transports keyed by their PeerManager name ("nearby", "bt"; tests: "fake")
+ * @param alwaysOn              names in [transports] that run beside the selected one (the relay and the WebRTC
+ *                              channel, spec 5.1): a peer reached on one of them is sent to over that transport
  * @param localHello            builds this node's HELLO (name, holds, caps, approvalPubkey); nodeId, pubkey and ts
  *                              are filled in here
  * @param scope                 collectors run here; cancel it to stop everything
@@ -75,6 +77,7 @@ class MeshRouter(
     replayGuard: ReplayGuard? = null,
     private val rosterStore: RosterStore? = null,
     onAuthFailure: (peerName: String, reason: String) -> Unit = { _, _ -> },
+    private val alwaysOn: Set<String> = emptySet(),
 ) : PeerManager {
 
     val nodeId: String = Wire.nodeIdOf(signer.publicKeyB64) ?: error("signer public key is not base64")
@@ -124,11 +127,13 @@ class MeshRouter(
 
     // ---- state guarded by `lock` ----
     private var active: SecureTransport? = null
+    /** Every started transport: the selected one plus the always-on ones, by name. */
+    private val running = LinkedHashMap<String, SecureTransport>()
     private val collectors = ArrayList<Job>()
     private var pairingMode = false
     private var pairingTimer: Job? = null
     private val connectedEndpoints = LinkedHashMap<String, PeerEndpoint>()      // endpoint key -> endpoint
-    private val endpointOfNode = HashMap<String, PeerEndpoint>()                 // nodeId -> most recent endpoint
+    private val endpointsOfNode = HashMap<String, LinkedHashMap<String, PeerEndpoint>>()   // nodeId -> transport name -> its endpoint
     private val greeted = HashSet<String>()                                      // endpoint keys we sent HELLO to
     private val lastHello = HashMap<String, HelloBody>()                         // nodeId -> last verified HELLO
     private val pendingPairing = HashMap<String, PendingHello>()                 // endpoint key -> unpinned HELLO
@@ -158,7 +163,18 @@ class MeshRouter(
     fun addSessionListener(l: SessionListener) = transports.values.forEach { it.addListener(l) }
 
     /** Re-evaluates every session against the pins (after a pin or forget made outside this router) and retries refused links. */
-    fun refreshSessions() = synchronized(lock) { active }?.refresh()
+    fun refreshSessions() = runningTransports().forEach { it.refresh() }
+
+    private fun runningTransports(): List<SecureTransport> = synchronized(lock) { running.values.toList() }
+
+    /** The transport a message to [ep] goes out on: the one the endpoint names, else the selected one. */
+    private fun transportFor(ep: PeerEndpoint): SecureTransport? = synchronized(lock) { running[ep.transport] ?: active }
+
+    /** The endpoint [nodeId] is reachable on right now (any running transport), or null. */
+    fun endpointOf(nodeId: String): PeerEndpoint? = endpointFor(nodeId)
+
+    /** The measured link to [nodeId] over the transport it is reached on (spec 5.6), or null when it is not connected. */
+    fun linkTo(nodeId: String): com.hivecore.core.Link? = endpointFor(nodeId)?.let { ep -> transportFor(ep)?.link(nodeId) }
 
     /** This phone's roster version for HELLO and the Swarm screen (null = no roster yet). */
     fun rosterVersion(): Long? = rosterStore?.latest()?.version
@@ -188,10 +204,11 @@ class MeshRouter(
     suspend fun start() = selectTransport(transportState.value)
 
     suspend fun stop() {
-        val t: Transport?
+        val ts: List<Transport>
         synchronized(lock) {
-            t = active
+            ts = running.values.toList()
             active = null
+            running.clear()
             collectors.forEach { it.cancel() }
             collectors.clear()
             connectedEndpoints.clear()
@@ -200,7 +217,7 @@ class MeshRouter(
             acceptedEndpoints.clear()
         }
         pendingState.value = emptyList()
-        t?.stop()
+        for (t in ts) runCatching { t.stop() }.onFailure { SLog.w(TAG, "stop ${t.name}: ${it.message}") }
         refreshPeers()
     }
 
@@ -213,10 +230,21 @@ class MeshRouter(
         stop()
         transportState.value = name
         bondedState.value = runCatching { bondedProvider() }.getOrDefault(emptyList())
+        synchronized(lock) { active = t }
+        val hello = localHello()
+        startOne(name, t, "${hello.name}|${nodeId.take(8)}")
+        for (extra in alwaysOn) {
+            if (extra == name) continue
+            val e = transports[extra] ?: run { SLog.w(TAG, "always-on transport '$extra' is not configured"); continue }
+            runCatching { startOne(extra, e, "${hello.name}|${nodeId.take(8)}") }.onFailure { SLog.w(TAG, "always-on transport '$extra' failed to start: ${it.message}") }
+        }
+    }
+
+    private suspend fun startOne(name: String, t: SecureTransport, localName: String) {
         val inboundReady = CompletableDeferred<Unit>()
         val pairingReady = CompletableDeferred<Unit>()
         synchronized(lock) {
-            active = t
+            running[name] = t
             collectors += scope.launch { t.inbound.onSubscription { inboundReady.complete(Unit) }.collect { onInbound(t, it) } }
             collectors += scope.launch { t.pairingRequests.onSubscription { pairingReady.complete(Unit) }.collect { onTransportPairing(it) } }
         }
@@ -224,12 +252,11 @@ class MeshRouter(
         inboundReady.await()
         pairingReady.await()
         t.setPairingMode(synchronized(lock) { pairingMode })
-        val hello = localHello()
-        t.start("${hello.name}|${nodeId.take(8)}")
+        t.start(localName)
         // The connected collector starts after the transport so the first HELLOs go out on a started transport
         // (a StateFlow replays its current value, so nothing is missed).
         synchronized(lock) { collectors += scope.launch { t.connected.collect { onConnected(t, it) } } }
-        SLog.d(TAG, "transport '$name' started as ${hello.name}|${nodeId.take(8)}")
+        SLog.d(TAG, "transport '$name' started as $localName")
     }
 
     fun refreshBonded() { bondedState.value = runCatching { bondedProvider() }.getOrDefault(emptyList()) }
@@ -237,17 +264,17 @@ class MeshRouter(
     // ------------------------------------------------------------------ PeerManager
 
     override fun setPairingMode(on: Boolean) {
-        val t: Transport?
+        val ts: List<Transport>
         synchronized(lock) {
             pairingMode = on
             pairingTimer?.cancel()
             pairingTimer = if (on) scope.launch { delay(pairingWindowMs); setPairingMode(false) } else null
             if (!on) pendingPairing.clear()
-            t = active
+            ts = running.values.toList()
         }
         pairingModeState.value = on
         if (!on) pendingState.value = emptyList()
-        t?.setPairingMode(on)
+        ts.forEach { it.setPairingMode(on) }
         SLog.d(TAG, "pairing mode ${if (on) "on" else "off"}")
         refreshPeers()
     }
@@ -276,7 +303,7 @@ class MeshRouter(
             return
         }
         // Raised by the transport (Nearby digits): forward, and remember the endpoint so its first HELLO pins.
-        val t = synchronized(lock) { active }
+        val t = transportFor(req.endpoint)
         removePending(k)
         if (ok) synchronized(lock) { acceptedEndpoints.add(k) }
         t?.acceptPairing(req, ok)
@@ -288,9 +315,9 @@ class MeshRouter(
         peerStore.forget(nodeId)
         synchronized(lock) {
             lastHello.remove(nodeId)
-            endpointOfNode.remove(nodeId)
+            endpointsOfNode.remove(nodeId)
         }
-        synchronized(lock) { active }?.let { it.close(nodeId, "forgotten"); it.refresh() }
+        runningTransports().forEach { it.close(nodeId, "forgotten"); it.refresh() }
         SLog.d(TAG, "forgot ${nodeId.take(8)}")
         refreshPeers()
     }
@@ -301,8 +328,8 @@ class MeshRouter(
 
     /** Sends one signed message to a pinned, connected node. */
     suspend fun send(nodeId: String, type: MsgType, bodyJson: String): Result<Unit> {
-        val t = synchronized(lock) { active } ?: return Result.failure(IllegalStateException("no transport"))
         val ep = endpointFor(nodeId) ?: return Result.failure(IllegalStateException("node ${nodeId.take(8)} is not connected"))
+        val t = transportFor(ep) ?: return Result.failure(IllegalStateException("no transport"))
         val r = t.send(ep, Wire.encode(type, this.nodeId, bodyJson, signer))
         if (r.isFailure) SLog.w(TAG, "send $type to ${nodeId.take(8)} failed: ${r.exceptionOrNull()?.message}")
         return r
@@ -310,10 +337,10 @@ class MeshRouter(
 
     /** Sends one signed message to every connected pinned node; returns the nodeIds it was sent to. */
     suspend fun broadcast(type: MsgType, bodyJson: String): List<String> {
-        val t = synchronized(lock) { active } ?: return emptyList()
         val bytes = Wire.encode(type, nodeId, bodyJson, signer)
         val out = ArrayList<String>()
         for ((id, ep) in connectedNodes()) {
+            val t = transportFor(ep) ?: continue
             if (t.send(ep, bytes).isSuccess) out += id else SLog.w(TAG, "broadcast $type to ${id.take(8)} failed")
         }
         return out
@@ -322,7 +349,7 @@ class MeshRouter(
     /** Every pinned node, connected or not. */
     fun pinnedNodeIds(): List<String> = peerStore.all().map { it.nodeId }
 
-    /** Pinned nodes with a live endpoint on the active transport. */
+    /** Pinned nodes with a live endpoint on a running transport. */
     fun connectedNodeIds(): List<String> = connectedNodes().map { it.first }
 
     /** Sends HELLO to every connected endpoint (after ingest/delete so peers' `holds` stay current). */
@@ -341,17 +368,23 @@ class MeshRouter(
     fun lastHello(nodeId: String): HelloBody? = synchronized(lock) { lastHello[nodeId] }
 
     private fun connectedNodes(): List<Pair<String, PeerEndpoint>> = synchronized(lock) {
-        endpointOfNode.entries
-            .filter { key(it.value) in connectedEndpoints && peerStore.isPinned(it.key) }
-            .map { it.key to it.value }
+        endpointsOfNode.keys.filter { peerStore.isPinned(it) }.mapNotNull { id -> bestEndpointLocked(id)?.let { id to it } }
     }
 
-    private fun endpointFor(nodeId: String): PeerEndpoint? = synchronized(lock) {
-        endpointOfNode[nodeId]?.takeIf { key(it) in connectedEndpoints }
-    }
+    private fun endpointFor(nodeId: String): PeerEndpoint? = synchronized(lock) { bestEndpointLocked(nodeId) }
+
+    /** Caller holds [lock]: the connected endpoint of [nodeId] on the best-ranked transport (spec 5.1 ladder: LAN before the relay). */
+    private fun bestEndpointLocked(nodeId: String): PeerEndpoint? =
+        endpointsOfNode[nodeId]?.values?.filter { key(it) in connectedEndpoints }?.minByOrNull { rankLocked(it) }
+
+    /** Caller holds [lock]: the ladder rank of the transport an endpoint belongs to (unknown transports rank last). */
+    private fun rankLocked(ep: PeerEndpoint): Int = (running[ep.transport] ?: active?.takeIf { it.name == ep.transport })?.kind?.ordinal ?: Int.MAX_VALUE
+
+    /** Caller holds [lock]: records that [nodeId] was seen on [ep]'s transport. */
+    private fun noteEndpointLocked(nodeId: String, ep: PeerEndpoint) { endpointsOfNode.getOrPut(nodeId) { LinkedHashMap() }[ep.transport] = ep }
 
     private suspend fun sendHello(ep: PeerEndpoint) {
-        val t = synchronized(lock) { active } ?: return
+        val t = transportFor(ep) ?: return
         val local = localHello()
         val body = local.copy(nodeId = nodeId, pubkey = signer.publicKeyB64, ts = now(), rosterVersion = local.rosterVersion ?: rosterVersion())
         synchronized(lock) { greeted.add(key(ep)) }
@@ -373,9 +406,9 @@ class MeshRouter(
                 if (k !in connectedEndpoints && k !in greeted) fresh += ep
                 connectedEndpoints[k] = ep
             }
-            // [list] is the endpoints with an exposed session; pairing state is per link and survives a refused
-            // handshake on a link the carrier still has (the owner's acceptance on one side comes before the other's).
-            val gone = connectedEndpoints.keys.filter { it !in keys }
+            // [list] is the endpoints with an exposed session on transport [t]; pairing state is per link and survives a
+            // refused handshake on a link the carrier still has (the owner's acceptance on one side comes before the other's).
+            val gone = connectedEndpoints.keys.filter { it.startsWith(t.name + "/") && it !in keys }
             val linkGone = gone.filter { k -> connectedEndpoints[k]?.let { t.hasLink(it) } != true }
             linkGone.forEach { removePending(it) }
             for (k in gone) {
@@ -432,7 +465,7 @@ class MeshRouter(
         }
         if (!checkBody(type, env, peer)) return
 
-        synchronized(lock) { endpointOfNode[env.from] = inb.endpoint }
+        synchronized(lock) { noteEndpointLocked(env.from, inb.endpoint) }
         peerStore.touch(env.from, now(), inb.endpoint.transport, inb.endpoint.endpointId)
         verifiedFlow.emit(Verified(type, env.from, env.body))
     }
@@ -596,16 +629,15 @@ class MeshRouter(
             if (peerStore.isPinned(id)) { SLog.w(TAG, "revoked ${peerStore.get(id)?.name ?: id.take(8)}: key deleted"); forget(id) }
         }
         scope.launch {
-            val t = synchronized(lock) { active } ?: return@launch
             val bytes = Wire.encode(type, nodeId, body, signer)
-            for ((id, ep) in connectedNodes()) if (id != from) t.send(ep, bytes)
+            for ((id, ep) in connectedNodes()) if (id != from) transportFor(ep)?.send(ep, bytes)
         }
     }
 
     /** Sends the signed roster and the revokes after it to a peer whose HELLO carried an older version. */
     private suspend fun sendRoster(to: PeerEndpoint, latest: RosterBody) {
         val rs = rosterStore ?: return
-        val t = synchronized(lock) { active } ?: return
+        val t = transportFor(to) ?: return
         val base = rs.signedRoster(latest.groupId) ?: return
         t.send(to, Wire.encode(MsgType.ROSTER, nodeId, MeshJson.encode(base), signer))
         for (r in rs.revokesAfter(latest.groupId, base.version)) t.send(to, Wire.encode(MsgType.REVOKE, nodeId, MeshJson.encode(r), signer))
@@ -648,7 +680,7 @@ class MeshRouter(
         val (mode, accepted) = synchronized(lock) { pairingMode to (k in acceptedEndpoints) }
         if (!mode && !accepted) {
             SLog.w(TAG, "dropped HELLO from unpinned ${hello.name} (${env.from.take(8)}): pairing mode is off; closing the link")
-            (synchronized(lock) { active } as? Disconnectable)?.disconnect(ep)
+            (transportFor(ep) as? Disconnectable)?.disconnect(ep)
             return
         }
         if (accepted) {
@@ -700,19 +732,19 @@ class MeshRouter(
         remember(hello.nodeId, hello, ep)
         synchronized(lock) { acceptedEndpoints.remove(key(ep)) }
         SLog.d(TAG, "pinned ${hello.name} (${hello.nodeId.take(8)}) via ${ep.transport}")
-        synchronized(lock) { active }?.refresh()
+        runningTransports().forEach { it.refresh() }
     }
 
     private fun remember(nodeId: String, hello: HelloBody, ep: PeerEndpoint) = synchronized(lock) {
         lastHello[nodeId] = hello
-        endpointOfNode[nodeId] = ep
+        noteEndpointLocked(nodeId, ep)
     }
 
     private fun refreshPeers() {
         val pinned = peerStore.all()
         val list = synchronized(lock) {
             val out = pinned.map { p ->
-                val ep = endpointOfNode[p.nodeId]?.takeIf { key(it) in connectedEndpoints }
+                val ep = bestEndpointLocked(p.nodeId)
                 Peer(p.nodeId, p.name, pinned = true, connected = ep != null, transport = ep?.transport, holds = p.holds)
             }
             val unpinned = pendingPairing.values.filter { pv -> out.none { it.nodeId == pv.hello.nodeId } }.map { pv ->
