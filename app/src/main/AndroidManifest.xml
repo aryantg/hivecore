@@ -44,6 +44,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.HiveCore">
 
+        <!-- Worker mode (spec 4.5): keeps the mesh and relay sockets alive while the owner opted in -->
+        <service android:name="com.hivecore.engine.device.WorkerService" android:exported="false" android:foregroundServiceType="connectedDevice|dataSync" />
+
         <activity
             android:name=".app.MainActivity"
             android:exported="true"
