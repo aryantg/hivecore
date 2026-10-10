@@ -1,0 +1,12 @@
+Mehta Stationers
+TAX INVOICE
+Invoice No: 1007
+Date: 12/10/2026
+Bill to: Meridian Traders Pvt Ltd
+Copier paper A4 x 20  ₹ 19,322.00
+Ballpoint pens x 200  ₹ 11,593.00
+Ring binders x 50  ₹ 7,729.00
+Subtotal: ₹ 38,644.00
+GST 18%: ₹ 6,956.00
+Total: ₹ 45,600.00
+Status: PAID

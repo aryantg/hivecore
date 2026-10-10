@@ -1,0 +1,12 @@
+Bluewave Hosting
+TAX INVOICE
+Invoice No: 1364
+Date: 2026-10-14
+Bill to: Meridian Traders Pvt Ltd
+Cloud server October  ₹ 22,882.00
+Backup storage  ₹ 13,729.00
+Domain renewal  ₹ 9,152.00
+Subtotal: ₹ 45,763.00
+GST 18%: ₹ 8,237.00
+Total: ₹ 54,000.00
+Status: Settled

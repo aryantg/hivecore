@@ -1,0 +1,11 @@
+build/
+.gradle/
+local.properties
+.idea/
+*.iml
+.kotlin/
+/captures/
+.DS_Store
+*.hprof
+relayd/relayd
+relayd/*.exe

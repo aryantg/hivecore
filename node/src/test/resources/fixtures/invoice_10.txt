@@ -1,0 +1,11 @@
+Vikram Hardware
+TAX INVOICE
+Invoice No: 1150
+Date: 11/10/2026
+Bill to: Meridian Traders Pvt Ltd
+Steel racks x 8  ₹ 47,458.00
+Anchor bolts x 200  ₹ 28,474.00
+Installation  ₹ 18,983.00
+GST 18%: ₹ 17,085.00
+Amount payable: ₹ 1,12,000.00
+Status: PAID

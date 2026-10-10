@@ -1,0 +1,24 @@
+{
+  "id": "bench_all",
+  "version": "1",
+  "title": "Benchmark every model",
+  "produces": "Latency p50/p95 per model per phone in t_job_bench; feeds the scheduler's cost model",
+  "axis": "shard",
+  "merge": "concat",
+  "input": "none",
+  "itemKinds": ["model"],
+  "sink": "table",
+  "table": "t_job_bench",
+  "replicate": "none",
+  "stages": [
+    {"id": "bench", "op": "BENCH", "params": {"items": "installed", "runs": 20}}
+  ],
+  "outputSchema": [
+    {"name": "model", "type": "TEXT", "groupable": true},
+    {"name": "phone", "type": "TEXT", "groupable": true},
+    {"name": "runtime", "type": "TEXT", "groupable": true},
+    {"name": "p50_ms", "type": "REAL"},
+    {"name": "p95_ms", "type": "REAL"},
+    {"name": "bit_exact", "type": "INTEGER"}
+  ]
+}

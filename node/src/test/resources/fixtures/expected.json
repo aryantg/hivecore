@@ -1,0 +1,634 @@
+{
+  "seed": 7,
+  "today": "2026-10-10",
+  "row_totals": {
+    "sales": 1204,
+    "employees": 61,
+    "invoices": 40,
+    "q4_sales": 1380,
+    "printed_invoices": 12,
+    "rows_held_q1": 1265
+  },
+  "headers": {
+    "employees.csv": [
+      "region",
+      "rep_id",
+      "name",
+      "salary",
+      "commission",
+      "joined"
+    ],
+    "sales.csv": [
+      "region",
+      "rep_id",
+      "month",
+      "revenue",
+      "units"
+    ],
+    "q4_sales.xlsx": [
+      "region",
+      "rep_id",
+      "month",
+      "revenue",
+      "units"
+    ],
+    "invoices.csv": [
+      "vendor",
+      "date",
+      "total",
+      "status",
+      "source"
+    ]
+  },
+  "employees_by_region": {
+    "East": 15,
+    "North": 15,
+    "South": 16,
+    "West": 15
+  },
+  "sales_rows_by_year": {
+    "2025": 204,
+    "2026": 1000
+  },
+  "sales_rows_by_region_2026": {
+    "East": 246,
+    "North": 238,
+    "South": 278,
+    "West": 238
+  },
+  "q1_revenue_by_region_2026_before_q4": {
+    "East": {
+      "revenue": 50797500,
+      "n": 246
+    },
+    "North": {
+      "revenue": 51033000,
+      "n": 238
+    },
+    "South": {
+      "revenue": 60607500,
+      "n": 278
+    },
+    "West": {
+      "revenue": 51460000,
+      "n": 238
+    }
+  },
+  "q1_revenue_by_region_2026_after_q4": {
+    "East": {
+      "revenue": 122335500,
+      "n": 593
+    },
+    "North": {
+      "revenue": 120801500,
+      "n": 565
+    },
+    "South": {
+      "revenue": 135480500,
+      "n": 647
+    },
+    "West": {
+      "revenue": 122050500,
+      "n": 575
+    }
+  },
+  "q1_total_revenue_2026_before_q4": 213898000,
+  "q1_total_revenue_2026_after_q4": 500668000,
+  "revenue_by_region_last_quarter_2026_07_09": {
+    "East": {
+      "revenue": 13662500,
+      "n": 69
+    },
+    "North": {
+      "revenue": 13878000,
+      "n": 67
+    },
+    "South": {
+      "revenue": 18601500,
+      "n": 92
+    },
+    "West": {
+      "revenue": 16294500,
+      "n": 78
+    }
+  },
+  "units_by_region_2026_before_q4": {
+    "East": {
+      "units": 4851,
+      "n": 246
+    },
+    "North": {
+      "units": 4584,
+      "n": 238
+    },
+    "South": {
+      "units": 5766,
+      "n": 278
+    },
+    "West": {
+      "units": 4927,
+      "n": 238
+    }
+  },
+  "revenue_by_month_all": {
+    "2025-10": {
+      "revenue": 14359500,
+      "n": 71
+    },
+    "2025-11": {
+      "revenue": 14351500,
+      "n": 76
+    },
+    "2025-12": {
+      "revenue": 12147000,
+      "n": 57
+    },
+    "2026-01": {
+      "revenue": 25421000,
+      "n": 121
+    },
+    "2026-02": {
+      "revenue": 27045500,
+      "n": 123
+    },
+    "2026-03": {
+      "revenue": 22825000,
+      "n": 105
+    },
+    "2026-04": {
+      "revenue": 28347500,
+      "n": 131
+    },
+    "2026-05": {
+      "revenue": 21624500,
+      "n": 94
+    },
+    "2026-06": {
+      "revenue": 26198000,
+      "n": 120
+    },
+    "2026-07": {
+      "revenue": 20528000,
+      "n": 95
+    },
+    "2026-08": {
+      "revenue": 23107500,
+      "n": 112
+    },
+    "2026-09": {
+      "revenue": 18801000,
+      "n": 99
+    }
+  },
+  "q2_avg_commission_west": {
+    "avg": 85760.0,
+    "sum": 1286400,
+    "n": 15
+  },
+  "avg_by_region_employees": {
+    "West": {
+      "n": 15,
+      "avg_salary": 1179933.3333333333,
+      "avg_commission": 85760.0
+    },
+    "South": {
+      "n": 16,
+      "avg_salary": 1176000.0,
+      "avg_commission": 85437.5
+    },
+    "North": {
+      "n": 15,
+      "avg_salary": 1058333.3333333333,
+      "avg_commission": 84920.0
+    },
+    "East": {
+      "n": 15,
+      "avg_salary": 1120466.6666666667,
+      "avg_commission": 85113.33333333333
+    }
+  },
+  "avg_salary_all": {
+    "avg": 1134377.049180328,
+    "n": 61
+  },
+  "avg_commission_all": {
+    "avg": 85309.83606557376,
+    "n": 61
+  },
+  "avg_revenue_east_all": {
+    "avg": 205955.12820512822,
+    "n": 312
+  },
+  "employees_joined_by_year": {
+    "2019": 11,
+    "2020": 6,
+    "2021": 15,
+    "2022": 1,
+    "2023": 4,
+    "2024": 9,
+    "2025": 9,
+    "2026": 6
+  },
+  "q3_rahul_rows": 2,
+  "q3_rahul_names": [
+    "Rahul Sharma",
+    "Rahul Verma"
+  ],
+  "revenue_west_2026_03": {
+    "revenue": 5648000,
+    "n": 24
+  },
+  "q5_october_invoices_typed": {
+    "sum": 1202900,
+    "n": 10
+  },
+  "q5_october_invoices_typed_plus_printed": {
+    "sum": 2090600,
+    "n": 22
+  },
+  "printed_invoices_total": {
+    "sum": 887700,
+    "n": 12,
+    "regex_friendly": 9,
+    "llm_fallback": 3
+  },
+  "invoices_by_status": {
+    "DUE": {
+      "total": 304300,
+      "n": 4
+    },
+    "PAID": {
+      "total": 3121200,
+      "n": 20
+    },
+    "UNPAID": {
+      "total": 1813500,
+      "n": 16
+    }
+  },
+  "invoices_by_vendor": {
+    "Bluewave Hosting": {
+      "total": 224800,
+      "n": 3
+    },
+    "Deccan Caterers": {
+      "total": 308700,
+      "n": 2
+    },
+    "Ganga Transport": {
+      "total": 1146500,
+      "n": 9
+    },
+    "Kavya Textiles": {
+      "total": 406800,
+      "n": 3
+    },
+    "Lotus Cleaning Services": {
+      "total": 374300,
+      "n": 3
+    },
+    "Mehta Stationers": {
+      "total": 242400,
+      "n": 3
+    },
+    "Nilgiri Tea Co": {
+      "total": 207200,
+      "n": 2
+    },
+    "Omkar Packaging": {
+      "total": 275100,
+      "n": 2
+    },
+    "Prism Office Supplies": {
+      "total": 869200,
+      "n": 4
+    },
+    "Sunrise Printers": {
+      "total": 1184000,
+      "n": 9
+    }
+  },
+  "invoices_total_all": {
+    "sum": 5239000,
+    "n": 40
+  },
+  "invoices_by_month": {
+    "2026-07": {
+      "total": 992000,
+      "n": 7
+    },
+    "2026-08": {
+      "total": 1723400,
+      "n": 14
+    },
+    "2026-09": {
+      "total": 1320700,
+      "n": 9
+    },
+    "2026-10": {
+      "total": 1202900,
+      "n": 10
+    }
+  },
+  "printed_invoices": [
+    {
+      "n": 1,
+      "png": "invoice_01.png",
+      "txt": "invoice_01.txt",
+      "vendor": "Mehta Stationers",
+      "invoice_no": "1007",
+      "date": "2026-10-12",
+      "month": "2026-10",
+      "total": 45600,
+      "status": "PAID",
+      "regex_friendly": true,
+      "regex_misses": [],
+      "date_line": "Date: 12/10/2026",
+      "total_line": "Total: ₹ 45,600.00",
+      "status_line": "Status: PAID"
+    },
+    {
+      "n": 2,
+      "png": "invoice_02.png",
+      "txt": "invoice_02.txt",
+      "vendor": "Arjun Logistics",
+      "invoice_no": "2214",
+      "date": "2026-10-05",
+      "month": "2026-10",
+      "total": 128400,
+      "status": "UNPAID",
+      "regex_friendly": true,
+      "regex_misses": [],
+      "date_line": "Date: 2026-10-05",
+      "total_line": "Grand Total: Rs. 1,28,400.00",
+      "status_line": "Status: UNPAID"
+    },
+    {
+      "n": 3,
+      "png": "invoice_03.png",
+      "txt": "invoice_03.txt",
+      "vendor": "Kavya Textiles",
+      "invoice_no": "3391",
+      "date": "2026-10-07",
+      "month": "2026-10",
+      "total": 62150,
+      "status": "DUE",
+      "regex_friendly": true,
+      "regex_misses": [],
+      "date_line": "Date: 7 Oct 2026",
+      "total_line": "Total: INR 62,150",
+      "status_line": "Status: DUE"
+    },
+    {
+      "n": 4,
+      "png": "invoice_04.png",
+      "txt": "invoice_04.txt",
+      "vendor": "Sunrise Printers",
+      "invoice_no": "4120",
+      "date": "2026-10-03",
+      "month": "2026-10",
+      "total": 18900,
+      "status": "PAID",
+      "regex_friendly": true,
+      "regex_misses": [],
+      "date_line": "Date: 03-10-2026",
+      "total_line": "Total: ₹ 18,900.00",
+      "status_line": "Status: PAID"
+    },
+    {
+      "n": 5,
+      "png": "invoice_05.png",
+      "txt": "invoice_05.txt",
+      "vendor": "Omkar Packaging",
+      "invoice_no": "5082",
+      "date": "2026-10-15",
+      "month": "2026-10",
+      "total": 73500,
+      "status": "DUE",
+      "regex_friendly": true,
+      "regex_misses": [],
+      "date_line": "Date: 15/10/2026",
+      "total_line": "Total: Rs 73,500",
+      "status_line": "Status: DUE"
+    },
+    {
+      "n": 6,
+      "png": "invoice_06.png",
+      "txt": "invoice_06.txt",
+      "vendor": "Deccan Caterers",
+      "invoice_no": "6633",
+      "date": "2026-10-08",
+      "month": "2026-10",
+      "total": 214000,
+      "status": "PAID",
+      "regex_friendly": true,
+      "regex_misses": [],
+      "date_line": "Date: 2026-10-08",
+      "total_line": "Total: ₹ 2,14,000.00",
+      "status_line": "Status: PAID"
+    },
+    {
+      "n": 7,
+      "png": "invoice_07.png",
+      "txt": "invoice_07.txt",
+      "vendor": "Lotus Cleaning Services",
+      "invoice_no": "7418",
+      "date": "2026-10-21",
+      "month": "2026-10",
+      "total": 36750,
+      "status": "UNPAID",
+      "regex_friendly": true,
+      "regex_misses": [],
+      "date_line": "Date: 21 October 2026",
+      "total_line": "Grand Total: ₹ 36,750.00",
+      "status_line": "Status: UNPAID"
+    },
+    {
+      "n": 8,
+      "png": "invoice_08.png",
+      "txt": "invoice_08.txt",
+      "vendor": "Prism Office Supplies",
+      "invoice_no": "8205",
+      "date": "2026-10-09",
+      "month": "2026-10",
+      "total": 9800,
+      "status": "PAID",
+      "regex_friendly": true,
+      "regex_misses": [],
+      "date_line": "Date: 09/10/2026",
+      "total_line": "Total: INR 9,800.00",
+      "status_line": "Status: PAID"
+    },
+    {
+      "n": 9,
+      "png": "invoice_09.png",
+      "txt": "invoice_09.txt",
+      "vendor": "Ganga Transport",
+      "invoice_no": "9377",
+      "date": "2026-10-19",
+      "month": "2026-10",
+      "total": 105300,
+      "status": "DUE",
+      "regex_friendly": true,
+      "regex_misses": [],
+      "date_line": "Date: 2026-10-19",
+      "total_line": "Total: ₹ 1,05,300.00",
+      "status_line": "Status: DUE"
+    },
+    {
+      "n": 10,
+      "png": "invoice_10.png",
+      "txt": "invoice_10.txt",
+      "vendor": "Vikram Hardware",
+      "invoice_no": "1150",
+      "date": "2026-10-11",
+      "month": "2026-10",
+      "total": 112000,
+      "status": "PAID",
+      "regex_friendly": false,
+      "regex_misses": [
+        "total"
+      ],
+      "date_line": "Date: 11/10/2026",
+      "total_line": "Amount payable: ₹ 1,12,000.00",
+      "status_line": "Status: PAID"
+    },
+    {
+      "n": 11,
+      "png": "invoice_11.png",
+      "txt": "invoice_11.txt",
+      "vendor": "Nilgiri Tea Co",
+      "invoice_no": "1288",
+      "date": "2026-10-03",
+      "month": "2026-10",
+      "total": 27300,
+      "status": "UNPAID",
+      "regex_friendly": false,
+      "regex_misses": [
+        "date"
+      ],
+      "date_line": "Dated the third of October, 2026",
+      "total_line": "Total: ₹ 27,300.00",
+      "status_line": "Status: UNPAID"
+    },
+    {
+      "n": 12,
+      "png": "invoice_12.png",
+      "txt": "invoice_12.txt",
+      "vendor": "Bluewave Hosting",
+      "invoice_no": "1364",
+      "date": "2026-10-14",
+      "month": "2026-10",
+      "total": 54000,
+      "status": "PAID",
+      "regex_friendly": false,
+      "regex_misses": [
+        "status"
+      ],
+      "date_line": "Date: 2026-10-14",
+      "total_line": "Total: ₹ 54,000.00",
+      "status_line": "Status: Settled"
+    }
+  ],
+  "docs": {
+    "leave_policy.pdf": {
+      "pages": 6,
+      "q6_locator": "p.2",
+      "q6_sentence": "A new joiner is entitled to 18 days of paid leave in the first year, accrued monthly."
+    },
+    "onboarding_checklist.docx": {
+      "paragraphs": 40,
+      "unit": "paragraph"
+    },
+    "q3_review.pptx": {
+      "slides": 14,
+      "q7_locator": "slide 3",
+      "q7_title": "Q3 priorities",
+      "q7_bullets": [
+        "Win back the top ten dormant accounts in the West",
+        "Launch the premium catalogue in the South",
+        "Cut the order-to-dispatch cycle to 48 hours"
+      ]
+    }
+  },
+  "dates.xlsx": {
+    "columns": [
+      "date",
+      "label",
+      "amount",
+      "due"
+    ],
+    "date_number_format": "yyyy-mm-dd (custom id >= 164)",
+    "due_number_format": "mm-dd-yy (built-in id 14)",
+    "rows": [
+      {
+        "date": "2026-01-05",
+        "date_serial": 46027,
+        "label": "January invoice",
+        "amount": 1200,
+        "due": "2026-02-04",
+        "due_serial": 46057
+      },
+      {
+        "date": "2026-02-14",
+        "date_serial": 46067,
+        "label": "February invoice",
+        "amount": 2350.5,
+        "due": "2026-03-16",
+        "due_serial": 46097
+      },
+      {
+        "date": "2026-03-01",
+        "date_serial": 46082,
+        "label": "March invoice",
+        "amount": 990,
+        "due": "2026-03-31",
+        "due_serial": 46112
+      },
+      {
+        "date": "2026-03-31",
+        "date_serial": 46112,
+        "label": "March end",
+        "amount": 4100,
+        "due": "2026-04-30",
+        "due_serial": 46142
+      },
+      {
+        "date": "2026-07-04",
+        "date_serial": 46207,
+        "label": "July invoice",
+        "amount": 15000,
+        "due": "2026-08-03",
+        "due_serial": 46237
+      },
+      {
+        "date": "2026-10-09",
+        "date_serial": 46304,
+        "label": "October invoice",
+        "amount": 870.25,
+        "due": "2026-11-08",
+        "due_serial": 46334
+      },
+      {
+        "date": "2025-12-25",
+        "date_serial": 46016,
+        "label": "Christmas",
+        "amount": 50,
+        "due": "2026-01-24",
+        "due_serial": 46046
+      },
+      {
+        "date": "2024-02-29",
+        "date_serial": 45351,
+        "label": "Leap day",
+        "amount": 2900,
+        "due": "2024-03-30",
+        "due_serial": 45381
+      }
+    ]
+  },
+  "legacy.xls": {
+    "bytes": 512,
+    "magic": "D0CF11E0A1B11AE1"
+  }
+}

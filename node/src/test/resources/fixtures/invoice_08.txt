@@ -1,0 +1,12 @@
+Prism Office Supplies
+TAX INVOICE
+Invoice No: 8205
+Date: 09/10/2026
+Bill to: Meridian Traders Pvt Ltd
+Whiteboard markers x 40  ₹ 4,152.00
+Sticky pads x 60  ₹ 2,492.00
+Staplers x 6  ₹ 1,661.00
+Subtotal: ₹ 8,305.00
+GST 18%: ₹ 1,495.00
+Total: INR 9,800.00
+Status: PAID

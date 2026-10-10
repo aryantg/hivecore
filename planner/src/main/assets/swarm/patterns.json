@@ -1,0 +1,187 @@
+{
+  "version": "1",
+  "patterns": [
+    {
+      "id": "per_unit",
+      "title": "a measure divided by a count, per group (revenue per rep by region)",
+      "reading": "{numerator} per {denominator}[ by {by}][ {period}]",
+      "requires": ["RATIO"],
+      "cues": ["per", "ratio", "share of", "for each"],
+      "slots": [
+        {"name": "numerator", "type": "measure", "prompt": "the amount being divided (before 'per')"},
+        {"name": "denominator", "type": "count", "prompt": "what is counted (after 'per')"},
+        {"name": "by", "type": "dimension", "optional": true, "prompt": "the grouping (after 'by')"},
+        {"name": "period", "type": "period", "optional": true, "prompt": "the time range"}
+      ],
+      "dag": [
+        {"id": "a", "op": "AGG", "q": "{numerator}[ by {by}][ {period}]", "measure": "numerator", "dims": ["by"], "period": "period"},
+        {"id": "b", "op": "AGG", "q": "number of {denominator}[ by {by}][ {period}]", "count": "denominator", "dims": ["by"], "period": "period"},
+        {"id": "r", "op": "RATIO", "in": ["a", "b"], "params": {"key": "{by}"}}
+      ],
+      "output": "r"
+    },
+    {
+      "id": "compare_two",
+      "title": "two measures side by side with their difference (invoice spend vs revenue)",
+      "reading": "{first} compared with {second}[ {period}]",
+      "requires": ["DIFF"],
+      "cues": ["compare", "vs", "versus", "difference", "against"],
+      "slots": [
+        {"name": "first", "type": "measure", "prompt": "the first amount compared"},
+        {"name": "second", "type": "measure", "prompt": "the second amount compared"},
+        {"name": "period", "type": "period", "optional": true, "prompt": "the time range"}
+      ],
+      "dag": [
+        {"id": "a", "op": "AGG", "q": "total {first}[ {period}]", "measure": "first", "period": "period"},
+        {"id": "b", "op": "AGG", "q": "total {second}[ {period}]", "measure": "second", "period": "period"},
+        {"id": "d", "op": "DIFF", "in": ["a", "b"], "params": {}}
+      ],
+      "output": "d"
+    },
+    {
+      "id": "growth_over_period",
+      "title": "how a measure changes month by month (revenue month on month)",
+      "reading": "{measure} month on month[ by {by}][ {period}]",
+      "requires": ["TREND"],
+      "cues": ["growth", "grow", "grew", "trend", "month on month", "change", "changed"],
+      "slots": [
+        {"name": "measure", "type": "measure", "prompt": "the amount that changes"},
+        {"name": "by", "type": "dimension", "optional": true, "prompt": "the grouping"},
+        {"name": "period", "type": "period", "optional": true, "prompt": "the time range"}
+      ],
+      "dag": [
+        {"id": "a", "op": "AGG", "q": "{measure} by month[ and {by}][ {period}]", "measure": "measure", "dims": ["month", "by"], "period": "period"},
+        {"id": "t", "op": "TREND", "in": ["a"], "params": {"time": "month", "key": "{by}"}}
+      ],
+      "output": "t"
+    },
+    {
+      "id": "top_k_by",
+      "title": "the top or bottom groups by a measure (top 2 regions by units)",
+      "reading": "{order} {k} {by} by {measure}[ {period}]",
+      "requires": ["RANK"],
+      "cues": ["top", "bottom", "best", "worst", "highest", "lowest", "rank", "most", "least"],
+      "slots": [
+        {"name": "measure", "type": "measure", "prompt": "the amount ranked"},
+        {"name": "by", "type": "dimension", "prompt": "what is ranked"},
+        {"name": "k", "type": "k", "default": "1", "prompt": "how many"},
+        {"name": "order", "type": "order", "default": "desc", "prompt": "highest or lowest first"},
+        {"name": "period", "type": "period", "optional": true, "prompt": "the time range"}
+      ],
+      "dag": [
+        {"id": "a", "op": "AGG", "q": "{measure} by {by}[ {period}]", "measure": "measure", "dims": ["by"], "period": "period"},
+        {"id": "t", "op": "RANK", "in": ["a"], "params": {"measure": "{measure}", "k": "{k}", "order": "{order}"}}
+      ],
+      "output": "t"
+    },
+    {
+      "id": "flag_vs_average",
+      "title": "groups whose average is above or below the overall average (commission above the company average)",
+      "reading": "{by} with average {measure} {cmp} the overall average[ {period}]",
+      "requires": ["THRESHOLD"],
+      "cues": ["above", "below", "exceeds", "exceed", "flag", "more than", "less than", "under", "over"],
+      "slots": [
+        {"name": "measure", "type": "measure", "prompt": "the amount averaged"},
+        {"name": "by", "type": "dimension", "prompt": "the groups flagged"},
+        {"name": "cmp", "type": "cmp", "default": "gt", "prompt": "above or below"},
+        {"name": "period", "type": "period", "optional": true, "prompt": "the time range"}
+      ],
+      "dag": [
+        {"id": "a", "op": "AGG", "q": "average {measure} by {by}[ {period}]", "measure": "measure", "metric": "avg", "dims": ["by"], "period": "period"},
+        {"id": "b", "op": "AGG", "q": "average {measure} overall[ {period}]", "measure": "measure", "metric": "avg", "period": "period"},
+        {"id": "t", "op": "THRESHOLD", "in": ["a", "b"], "params": {"measure": "{measure}", "op": "{cmp}", "reference": "b"}}
+      ],
+      "output": "t"
+    },
+    {
+      "id": "reconcile_counts",
+      "title": "check that two departments' counts per group match (Sales reps vs HR headcount)",
+      "reading": "{left} count vs {right} count by {by}",
+      "requires": ["RECONCILE"],
+      "cues": ["match", "matches", "reconcile", "consistent", "agree", "tally"],
+      "slots": [
+        {"name": "left", "type": "count", "prompt": "the first thing counted"},
+        {"name": "right", "type": "count", "prompt": "the second thing counted"},
+        {"name": "by", "type": "dimension", "prompt": "the grouping"}
+      ],
+      "dag": [
+        {"id": "a", "op": "AGG", "q": "number of {left} by {by}", "count": "left", "dims": ["by"]},
+        {"id": "b", "op": "AGG", "q": "number of {right} by {by}", "count": "right", "dims": ["by"]},
+        {"id": "c", "op": "RECONCILE", "in": ["a", "b"], "params": {"key": "{by}"}}
+      ],
+      "output": "c"
+    },
+    {
+      "id": "ratio_then_rank",
+      "title": "a per-group ratio, then the highest or lowest groups (region with the highest revenue per rep)",
+      "reading": "{by} with the {order} {numerator} per {denominator}[ {period}]",
+      "requires": ["RATIO", "RANK"],
+      "cues": [],
+      "slots": [
+        {"name": "numerator", "type": "measure", "prompt": "the amount being divided (before 'per')"},
+        {"name": "denominator", "type": "count", "prompt": "what is counted (after 'per')"},
+        {"name": "by", "type": "dimension", "prompt": "the grouping that is ranked"},
+        {"name": "k", "type": "k", "default": "1", "prompt": "how many"},
+        {"name": "order", "type": "order", "default": "desc", "prompt": "highest or lowest first"},
+        {"name": "period", "type": "period", "optional": true, "prompt": "the time range"}
+      ],
+      "dag": [
+        {"id": "a", "op": "AGG", "q": "{numerator} by {by}[ {period}]", "measure": "numerator", "dims": ["by"], "period": "period"},
+        {"id": "b", "op": "AGG", "q": "number of {denominator} by {by}[ {period}]", "count": "denominator", "dims": ["by"], "period": "period"},
+        {"id": "r", "op": "RATIO", "in": ["a", "b"], "params": {"key": "{by}"}},
+        {"id": "t", "op": "RANK", "in": ["r"], "params": {"measure": "ratio", "k": "{k}", "order": "{order}"}}
+      ],
+      "output": "t"
+    },
+    {
+      "id": "multi_doc_extract",
+      "title": "key points pulled word for word from one or two documents, cited",
+      "reading": "key points of {doc1}[ and {doc2}]",
+      "requires": ["EXTRACT"],
+      "cues": ["key points", "summarise", "summarize", "summary", "action items", "highlights"],
+      "slots": [
+        {"name": "doc1", "type": "doc", "prompt": "the first document"},
+        {"name": "doc2", "type": "doc", "optional": true, "prompt": "the second document"}
+      ],
+      "dag": [
+        {"id": "d1", "op": "DOC", "q": "key points of {doc1}", "doc": "doc1"},
+        {"id": "e1", "op": "EXTRACT", "in": ["d1"], "params": {"question": "key points", "doc": "{doc1}"}},
+        {"id": "d2", "op": "DOC", "q": "key points of {doc2}", "doc": "doc2", "needs": ["doc2"]},
+        {"id": "e2", "op": "EXTRACT", "in": ["d2"], "params": {"question": "key points", "doc": "{doc2}"}, "needs": ["doc2"]},
+        {"id": "r", "op": "RENDER", "in": ["e1", "e2"], "params": {"kind": "cited_points"}}
+      ],
+      "output": "r"
+    },
+    {
+      "id": "bulk_ocr_close",
+      "title": "read released invoice photos and reconcile them with the invoice table",
+      "reading": "OCR {items} and reconcile with invoices",
+      "bulk": true,
+      "slots": [
+        {"name": "items", "type": "items", "prompt": "released invoice photos"},
+        {"name": "period", "type": "period", "optional": true, "prompt": "the time range"}
+      ],
+      "dag": [
+        {"id": "o", "op": "OCR", "each": "items", "params": {"item": "{item}"}},
+        {"id": "f", "op": "FIELDS", "each": "items", "in": ["o"], "params": {"fields": ["vendor", "date", "total", "status"]}},
+        {"id": "a", "op": "AGG", "q": "invoice total by vendor[ {period}]", "table": "invoices", "column": "total", "owner_of": "items", "dims": ["vendor"], "period": "period"},
+        {"id": "c", "op": "RECONCILE", "in": ["f", "a"], "params": {"key": "vendor"}}
+      ],
+      "output": "c"
+    },
+    {
+      "id": "eval_sweep",
+      "title": "run a question set as an evaluation across idle phones",
+      "reading": "evaluate {items}",
+      "bulk": true,
+      "slots": [
+        {"name": "items", "type": "items", "prompt": "evaluation case ids"}
+      ],
+      "dag": [
+        {"id": "e", "op": "EVAL", "each": "items", "params": {"case": "{item}"}},
+        {"id": "s", "op": "RENDER", "in": ["e"], "params": {"kind": "eval_summary"}}
+      ],
+      "output": "s"
+    }
+  ]
+}

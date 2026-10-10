@@ -1,0 +1,54 @@
+{
+  "_comment": [
+    "Few-shot examples for the HR node's intent prompt (plan section 8). Loaded by com.hivecore.llm.FewShots.",
+    "Shape: {role, shots:[{question, answer}]}. answer is an IntentSet object: {intents:[{table, metric, column?, group_by?, filters?}]} or {not_relevant:true}, optionally led by \"skip\" (measures that belong to another node; the parser ignores the key).",
+    "Each shot becomes a user turn (the question) and an assistant turn (the answer re-encoded compactly, key order kept). Keep exactly three; mined rows are added at runtime by the evening close.",
+    "Shot 2 shows the coverage rule on a two-part question: units are not ours (skip), headcount is; the time phrase has no month column here to filter, so it is ignored. It sits second on purpose: measured on the NPU (Wave 4), the order avg / two-part / not_relevant gave the right Q1 intent in every run without making single-part questions grow a group_by."
+  ],
+  "role": "HR",
+  "shots": [
+    {
+      "question": "Average salary in the South region",
+      "answer": {
+        "skip": [],
+        "intents": [
+          {
+            "table": "employees",
+            "metric": "avg",
+            "column": "salary",
+            "filters": [
+              {
+                "column": "region",
+                "op": "eq",
+                "value": "South"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "question": "Units sold per region last quarter, and how many staff per region?",
+      "answer": {
+        "skip": [
+          "units"
+        ],
+        "intents": [
+          {
+            "table": "employees",
+            "metric": "count",
+            "group_by": [
+              "region"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "question": "What were last month's unit sales?",
+      "answer": {
+        "not_relevant": true
+      }
+    }
+  ]
+}

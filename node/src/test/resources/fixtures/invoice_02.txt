@@ -1,0 +1,12 @@
+Arjun Logistics
+TAX INVOICE
+Invoice No: 2214
+Date: 2026-10-05
+Bill to: Meridian Traders Pvt Ltd
+Freight Pune to Surat  ₹ 54,407.00
+Loading and handling  ₹ 32,644.00
+Insurance cover  ₹ 21,763.00
+Subtotal: ₹ 1,08,814.00
+GST 18%: ₹ 19,586.00
+Grand Total: Rs. 1,28,400.00
+Status: UNPAID

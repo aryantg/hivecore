@@ -1,0 +1,12 @@
+Deccan Caterers
+TAX INVOICE
+Invoice No: 6633
+Date: 2026-10-08
+Bill to: Meridian Traders Pvt Ltd
+Lunch service 12 sittings  ₹ 90,678.00
+Tea and snacks  ₹ 54,407.00
+Service staff  ₹ 36,271.00
+Subtotal: ₹ 1,81,356.00
+GST 18%: ₹ 32,644.00
+Total: ₹ 2,14,000.00
+Status: PAID

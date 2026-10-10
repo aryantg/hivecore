@@ -1,0 +1,449 @@
+[
+  {
+    "q": "Revenue per rep by region this year",
+    "expect": "answer",
+    "pattern": "per_unit",
+    "nodes": [
+      "SALES",
+      "HR"
+    ],
+    "expected": {
+      "numerator": {
+        "East": 50797500,
+        "North": 51033000,
+        "South": 60607500,
+        "West": 51460000
+      },
+      "denominator": {
+        "East": 15,
+        "North": 15,
+        "South": 16,
+        "West": 15
+      },
+      "ratio": {
+        "East": 3386500.0,
+        "North": 3402200.0,
+        "South": 3787968.75,
+        "West": 3430666.67
+      }
+    }
+  },
+  {
+    "q": "Which region has the highest revenue per rep, and is its average commission above the company average?",
+    "expect": "answer",
+    "pattern": "ratio_then_rank+flag_vs_average",
+    "nodes": [
+      "SALES",
+      "HR"
+    ],
+    "expected": {
+      "top": {
+        "key": "South",
+        "value": 4433375.0
+      },
+      "commission_avg": 85437.5,
+      "company_avg": 85309.84,
+      "above": true,
+      "note": "needs HR consent (one fingerprint) for commission"
+    }
+  },
+  {
+    "q": "How did revenue change month on month in Q3 by region?",
+    "expect": "answer",
+    "pattern": "growth_over_period",
+    "nodes": [
+      "SALES"
+    ],
+    "expected": {
+      "East": [
+        {
+          "month": "2026-07",
+          "value": 3371000
+        },
+        {
+          "month": "2026-08",
+          "value": 5558000,
+          "delta": 2187000,
+          "pct": 64.88
+        },
+        {
+          "month": "2026-09",
+          "value": 4733500,
+          "delta": -824500,
+          "pct": -14.83
+        }
+      ],
+      "North": [
+        {
+          "month": "2026-07",
+          "value": 6145500
+        },
+        {
+          "month": "2026-08",
+          "value": 3331500,
+          "delta": -2814000,
+          "pct": -45.79
+        },
+        {
+          "month": "2026-09",
+          "value": 4401000,
+          "delta": 1069500,
+          "pct": 32.1
+        }
+      ],
+      "South": [
+        {
+          "month": "2026-07",
+          "value": 6161000
+        },
+        {
+          "month": "2026-08",
+          "value": 8219500,
+          "delta": 2058500,
+          "pct": 33.41
+        },
+        {
+          "month": "2026-09",
+          "value": 4221000,
+          "delta": -3998500,
+          "pct": -48.65
+        }
+      ],
+      "West": [
+        {
+          "month": "2026-07",
+          "value": 4850500
+        },
+        {
+          "month": "2026-08",
+          "value": 5998500,
+          "delta": 1148000,
+          "pct": 23.67
+        },
+        {
+          "month": "2026-09",
+          "value": 5445500,
+          "delta": -553000,
+          "pct": -9.22
+        }
+      ]
+    }
+  },
+  {
+    "q": "Top 2 regions by units sold in 2026",
+    "expect": "answer",
+    "pattern": "top_k_by",
+    "nodes": [
+      "SALES"
+    ],
+    "expected": [
+      {
+        "key": "South",
+        "value": 5766
+      },
+      {
+        "key": "West",
+        "value": 4927
+      }
+    ]
+  },
+  {
+    "q": "Compare October invoice spend with October revenue",
+    "expect": "answer",
+    "pattern": "compare_two",
+    "nodes": [
+      "ACCOUNTS",
+      "SALES"
+    ],
+    "expected": {
+      "a": 1202900,
+      "b": 0,
+      "diff": 1202900,
+      "note": "no sales rows for October in the seed: revenue 0"
+    }
+  },
+  {
+    "q": "Do Sales rep counts per region match HR headcount?",
+    "expect": "answer",
+    "pattern": "reconcile_counts",
+    "nodes": [
+      "SALES",
+      "HR"
+    ],
+    "expected": {
+      "sales": {
+        "East": 15,
+        "North": 15,
+        "South": 16,
+        "West": 15
+      },
+      "hr": {
+        "East": 15,
+        "North": 15,
+        "South": 16,
+        "West": 15
+      },
+      "mismatches": []
+    }
+  },
+  {
+    "q": "Key points from the onboarding checklist and the Q3 review",
+    "expect": "answer",
+    "pattern": "multi_doc_extract",
+    "nodes": [
+      "HR",
+      "SALES"
+    ],
+    "expected": {
+      "docs": [
+        "onboarding_checklist.docx",
+        "q3_review.pptx"
+      ],
+      "kind": "extractive, cited sentence ids"
+    }
+  },
+  {
+    "q": "Bulk: 120 invoice photos released by Accounts, reconciled with the invoice table",
+    "expect": "answer",
+    "pattern": "bulk_ocr_close",
+    "nodes": [
+      "ACCOUNTS"
+    ],
+    "expected": {
+      "items": 120,
+      "fixture": "tools/workloads/invoices_120/",
+      "invoice_total_by_vendor": {
+        "Bluewave Hosting": 224800,
+        "Deccan Caterers": 308700,
+        "Ganga Transport": 1146500,
+        "Kavya Textiles": 406800,
+        "Lotus Cleaning Services": 374300,
+        "Mehta Stationers": 242400,
+        "Nilgiri Tea Co": 207200,
+        "Omkar Packaging": 275100,
+        "Prism Office Supplies": 869200,
+        "Sunrise Printers": 1184000
+      }
+    }
+  },
+  {
+    "q": "Bulk: the 50-question Gate 2 set as an eval sweep across idle phones",
+    "expect": "answer",
+    "pattern": "eval_sweep",
+    "nodes": [
+      "HR",
+      "SALES",
+      "ACCOUNTS"
+    ],
+    "expected": {
+      "cases": 50,
+      "source": "tools/questions_50.json"
+    }
+  },
+  {
+    "q": "What is the average salary in West, and the average salary in West without Jatin Chauhan?",
+    "expect": "refusal",
+    "pattern": null,
+    "nodes": [
+      "HR"
+    ],
+    "expected": {
+      "reason": "differencing pair: the two figures together isolate one person's salary"
+    }
+  },
+  {
+    "q": "Rank reps by commission",
+    "expect": "refusal",
+    "pattern": null,
+    "nodes": [
+      "HR"
+    ],
+    "expected": {
+      "reason": "commission is confidential (average or count only) and rep_id is not groupable"
+    }
+  },
+  {
+    "q": "Summarise the leave policy",
+    "expect": "refusal",
+    "pattern": null,
+    "nodes": [
+      "HR"
+    ],
+    "expected": {
+      "reason": "leave_policy.pdf marked confidential and the asker is not its owner (gate sets the flag)"
+    }
+  },
+  {
+    "q": "Forecast next year's revenue",
+    "expect": "refusal",
+    "pattern": null,
+    "nodes": [
+      "SALES"
+    ],
+    "expected": {
+      "reason": "out of the operator set: no forecasting operator"
+    }
+  },
+  {
+    "q": "Which regions have an average commission above the company average?",
+    "expect": "answer",
+    "pattern": "flag_vs_average",
+    "nodes": [
+      "HR"
+    ],
+    "expected": {
+      "by": {
+        "East": 85113.33,
+        "North": 84920.0,
+        "South": 85437.5,
+        "West": 85760.0
+      },
+      "overall": 85309.84,
+      "op": "gt",
+      "flagged": [
+        "South",
+        "West"
+      ]
+    }
+  },
+  {
+    "q": "Revenue per rep by region last quarter",
+    "expect": "answer",
+    "pattern": "per_unit",
+    "nodes": [
+      "SALES",
+      "HR"
+    ],
+    "expected": {
+      "numerator": {
+        "East": 13662500,
+        "North": 13878000,
+        "South": 18601500,
+        "West": 16294500
+      },
+      "denominator": {
+        "East": 15,
+        "North": 15,
+        "South": 16,
+        "West": 15
+      },
+      "ratio": {
+        "East": 910833.33,
+        "North": 925200.0,
+        "South": 1162593.75,
+        "West": 1086300.0
+      }
+    }
+  },
+  {
+    "q": "Units per rep by region this year",
+    "expect": "answer",
+    "pattern": "per_unit",
+    "nodes": [
+      "SALES",
+      "HR"
+    ],
+    "expected": {
+      "numerator": {
+        "East": 4851,
+        "North": 4584,
+        "South": 5766,
+        "West": 4927
+      },
+      "denominator": {
+        "East": 15,
+        "North": 15,
+        "South": 16,
+        "West": 15
+      },
+      "ratio": {
+        "East": 323.4,
+        "North": 305.6,
+        "South": 360.38,
+        "West": 328.47
+      }
+    }
+  },
+  {
+    "q": "Top 3 vendors by invoice spend",
+    "expect": "answer",
+    "pattern": "top_k_by",
+    "nodes": [
+      "ACCOUNTS"
+    ],
+    "expected": [
+      {
+        "key": "Sunrise Printers",
+        "value": 1184000
+      },
+      {
+        "key": "Ganga Transport",
+        "value": 1146500
+      },
+      {
+        "key": "Prism Office Supplies",
+        "value": 869200
+      }
+    ]
+  },
+  {
+    "q": "Lowest region by revenue last month",
+    "expect": "answer",
+    "pattern": "top_k_by",
+    "nodes": [
+      "SALES"
+    ],
+    "expected": [
+      {
+        "key": "South",
+        "value": 4221000
+      }
+    ]
+  },
+  {
+    "q": "Which vendors have average invoice spend above the overall average?",
+    "expect": "answer",
+    "pattern": "flag_vs_average",
+    "nodes": [
+      "ACCOUNTS"
+    ],
+    "expected": {
+      "by": {
+        "Bluewave Hosting": 74933.33,
+        "Deccan Caterers": 154350.0,
+        "Ganga Transport": 127388.89,
+        "Kavya Textiles": 135600.0,
+        "Lotus Cleaning Services": 124766.67,
+        "Mehta Stationers": 80800.0,
+        "Nilgiri Tea Co": 103600.0,
+        "Omkar Packaging": 137550.0,
+        "Prism Office Supplies": 217300.0,
+        "Sunrise Printers": 131555.56
+      },
+      "overall": 130975.0,
+      "op": "gt",
+      "flagged": [
+        "Deccan Caterers",
+        "Kavya Textiles",
+        "Omkar Packaging",
+        "Prism Office Supplies",
+        "Sunrise Printers"
+      ]
+    }
+  },
+  {
+    "q": "Which region has the lowest units per rep this year?",
+    "expect": "answer",
+    "pattern": "ratio_then_rank",
+    "nodes": [
+      "SALES",
+      "HR"
+    ],
+    "expected": [
+      {
+        "key": "North",
+        "value": 305.6
+      }
+    ]
+  }
+]

@@ -1,0 +1,18 @@
+{
+  "id": "product_shot_batch",
+  "version": "1",
+  "title": "Product shot batch",
+  "produces": "8 generated product shots ranked by score; the winner upscaled to 2048 px, tiled across phones",
+  "axis": "fanout",
+  "merge": "rank",
+  "input": "prompt",
+  "itemKinds": ["prompt"],
+  "sink": "folder",
+  "replicate": "none",
+  "stages": [
+    {"id": "gen", "op": "GEN_VARIANTS", "params": {"prompt": "{item}", "n": 8, "seed": 1, "steps": 20, "guidance": 7.5, "size": 512}},
+    {"id": "score", "op": "SCORE_IMAGE", "params": {"prompt": "{item}"}, "inputs": ["gen"]},
+    {"id": "rank", "op": "RANK", "params": {"by": ["safe", "clip", "iqa"]}, "inputs": ["score"]},
+    {"id": "upscale", "op": "UPSCALE", "params": {"top": 1, "size": 2048, "tile": 256, "overlap": 16}, "inputs": ["rank"]}
+  ]
+}

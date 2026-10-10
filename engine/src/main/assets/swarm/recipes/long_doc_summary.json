@@ -1,0 +1,16 @@
+{
+  "id": "long_doc_summary",
+  "version": "1",
+  "title": "Long document summary",
+  "produces": "An extractive summary of a long document: 40-sentence chunks summarised in parallel, then tree-merged",
+  "axis": "chunk",
+  "merge": "tree",
+  "input": "files",
+  "itemKinds": ["pdf", "doc", "text"],
+  "sink": "folder",
+  "replicate": "sample:0.1",
+  "stages": [
+    {"id": "text", "op": "DOC", "params": {"item": "{item}", "units": "sentences"}},
+    {"id": "summary", "op": "SUMMARIZE", "params": {"mode": "extractive", "chunkSentences": 40, "overlap": 2, "sentences": 6}, "inputs": ["text"]}
+  ]
+}

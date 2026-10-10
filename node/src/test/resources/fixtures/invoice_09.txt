@@ -1,0 +1,12 @@
+Ganga Transport
+TAX INVOICE
+Invoice No: 9377
+Date: 2026-10-19
+Bill to: Meridian Traders Pvt Ltd
+Monthly staff shuttle  ₹ 44,618.00
+Fuel surcharge  ₹ 26,771.00
+Toll charges  ₹ 17,848.00
+Subtotal: ₹ 89,237.00
+GST 18%: ₹ 16,063.00
+Total: ₹ 1,05,300.00
+Status: DUE

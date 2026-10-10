@@ -1,0 +1,331 @@
+{
+  "version": 1,
+  "today": "2026-10-10",
+  "notes": [
+    "Role names match core NodeRole: HR, SALES, ACCOUNTS.",
+    "HR seeds employees + onboarding_checklist.docx only; leave_policy.pdf arrives live by share sheet in the tour (kept in assets for tests and the Wave 2 hook).",
+    "invoices.csv has no month column: month = substr(date,1,7) is derived at import (plan section 7) and registered groupable; it is listed here with derived so the flags are known.",
+    "Seed rows carry _sources.seed = 1 and _docs.seed = 1."
+  ],
+  "roles": {
+    "HR": {
+      "tables": [
+        "employees"
+      ],
+      "docs": [
+        "onboarding_checklist.docx"
+      ]
+    },
+    "SALES": {
+      "tables": [
+        "sales"
+      ],
+      "docs": [
+        "q3_review.pptx"
+      ]
+    },
+    "ACCOUNTS": {
+      "tables": [
+        "invoices"
+      ],
+      "docs": []
+    }
+  },
+  "tables": {
+    "employees": {
+      "file": "employees.csv",
+      "rows": 61,
+      "confidential": true,
+      "aliases": [
+        "employees",
+        "employee",
+        "reps",
+        "rep",
+        "staff",
+        "headcount",
+        "people",
+        "salaries",
+        "commissions"
+      ],
+      "columns": [
+        {
+          "name": "region",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "regions",
+            "area",
+            "zone",
+            "territory"
+          ]
+        },
+        {
+          "name": "rep_id",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": true,
+          "groupable": false,
+          "aliases": [
+            "rep id",
+            "employee id",
+            "id"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": true,
+          "groupable": false,
+          "aliases": [
+            "names",
+            "employee name",
+            "called",
+            "named"
+          ]
+        },
+        {
+          "name": "salary",
+          "type": "INTEGER",
+          "confidential": true,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "salaries",
+            "pay",
+            "wage",
+            "wages",
+            "ctc"
+          ]
+        },
+        {
+          "name": "commission",
+          "type": "INTEGER",
+          "confidential": true,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "commissions",
+            "bonus",
+            "incentive"
+          ]
+        },
+        {
+          "name": "joined",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "joining date",
+            "join date",
+            "joining",
+            "hired",
+            "start date"
+          ]
+        }
+      ]
+    },
+    "sales": {
+      "file": "sales.csv",
+      "rows": 1204,
+      "confidential": false,
+      "aliases": [
+        "sales",
+        "revenue",
+        "sold",
+        "units",
+        "orders",
+        "turnover"
+      ],
+      "columns": [
+        {
+          "name": "region",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "regions",
+            "area",
+            "zone",
+            "territory"
+          ]
+        },
+        {
+          "name": "rep_id",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": true,
+          "groupable": false,
+          "aliases": [
+            "rep id",
+            "rep",
+            "employee id"
+          ]
+        },
+        {
+          "name": "month",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "months",
+            "period"
+          ]
+        },
+        {
+          "name": "revenue",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "revenues",
+            "turnover",
+            "income",
+            "sales value",
+            "earnings"
+          ]
+        },
+        {
+          "name": "units",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "unit",
+            "quantity",
+            "qty",
+            "volume",
+            "pieces"
+          ]
+        }
+      ]
+    },
+    "invoices": {
+      "file": "invoices.csv",
+      "rows": 40,
+      "confidential": false,
+      "aliases": [
+        "invoices",
+        "invoice",
+        "invoiced",
+        "billed",
+        "bills",
+        "payable",
+        "vendors",
+        "spend"
+      ],
+      "columns": [
+        {
+          "name": "vendor",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "vendors",
+            "supplier",
+            "suppliers",
+            "seller"
+          ]
+        },
+        {
+          "name": "date",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "dates",
+            "invoice date"
+          ]
+        },
+        {
+          "name": "month",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "months",
+            "period"
+          ],
+          "derived": "substr(date,1,7)"
+        },
+        {
+          "name": "total",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "totals",
+            "amount",
+            "amounts",
+            "value",
+            "spend"
+          ]
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "paid",
+            "unpaid",
+            "due",
+            "outstanding",
+            "state"
+          ]
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "typed",
+            "ocr",
+            "scanned"
+          ]
+        }
+      ]
+    }
+  },
+  "docs": {
+    "onboarding_checklist.docx": {
+      "file": "onboarding_checklist.docx",
+      "kind": "docx",
+      "role": "HR",
+      "seeded": true,
+      "unitLabel": "paragraph",
+      "confidential": false
+    },
+    "q3_review.pptx": {
+      "file": "q3_review.pptx",
+      "kind": "pptx",
+      "role": "SALES",
+      "seeded": true,
+      "unitLabel": "slide",
+      "confidential": false
+    },
+    "leave_policy.pdf": {
+      "file": "leave_policy.pdf",
+      "kind": "pdf",
+      "role": "HR",
+      "seeded": false,
+      "unitLabel": "page",
+      "confidential": false,
+      "note": "shared into the HR phone live during the tour"
+    }
+  }
+}

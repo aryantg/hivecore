@@ -1,0 +1,12 @@
+Omkar Packaging
+TAX INVOICE
+Invoice No: 5082
+Date: 15/10/2026
+Bill to: Meridian Traders Pvt Ltd
+Corrugated boxes x 400  ₹ 31,144.00
+Bubble wrap rolls x 20  ₹ 18,686.00
+Packing tape x 48  ₹ 12,458.00
+Subtotal: ₹ 62,288.00
+GST 18%: ₹ 11,212.00
+Total: Rs 73,500
+Status: DUE

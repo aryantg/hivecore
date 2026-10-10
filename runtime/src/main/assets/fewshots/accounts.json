@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "Few-shot examples for the Accounts node's intent prompt (plan section 8). Loaded by com.hivecore.llm.FewShots.",
+    "Shape: {role, shots:[{question, answer}]}. answer is an IntentSet object: {intents:[{table, metric, column?, group_by?, filters?}]} or {not_relevant:true}.",
+    "Each shot becomes a user turn (the question) and an assistant turn (the answer re-encoded compactly). Keep exactly three; mined rows are added at runtime by the evening close.",
+    "Shot 1 shows a month-name filter in the demo year 2026 (month = substr(date,1,7) is derived at import). Shot 2 shows a status filter with the value as stored."
+  ],
+  "role": "ACCOUNTS",
+  "shots": [
+    {
+      "question": "Total invoiced in October?",
+      "answer": {"intents": [{"table": "invoices", "metric": "sum", "column": "total", "filters": [{"column": "month", "op": "eq", "value": "2026-10"}]}]}
+    },
+    {
+      "question": "How many unpaid invoices?",
+      "answer": {"intents": [{"table": "invoices", "metric": "count", "filters": [{"column": "status", "op": "eq", "value": "UNPAID"}]}]}
+    },
+    {
+      "question": "Average commission in the West",
+      "answer": {"not_relevant": true}
+    }
+  ]
+}

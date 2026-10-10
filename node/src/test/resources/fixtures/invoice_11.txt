@@ -1,0 +1,12 @@
+Nilgiri Tea Co
+TAX INVOICE
+Invoice No: 1288
+Dated the third of October, 2026
+Bill to: Meridian Traders Pvt Ltd
+Assam CTC 10 kg  ₹ 11,568.00
+Green tea 2 kg  ₹ 6,941.00
+Delivery  ₹ 4,627.00
+Subtotal: ₹ 23,136.00
+GST 18%: ₹ 4,164.00
+Total: ₹ 27,300.00
+Status: UNPAID

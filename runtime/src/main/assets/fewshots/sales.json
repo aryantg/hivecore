@@ -1,0 +1,72 @@
+{
+  "_comment": [
+    "Few-shot examples for the Sales node's intent prompt (plan section 8). Loaded by com.hivecore.llm.FewShots.",
+    "Shape: {role, shots:[{question, answer}]}. answer is an IntentSet object: {intents:[{table, metric, column?, group_by?, filters?}]} or {not_relevant:true}, optionally led by \"skip\" (measures that belong to another node; the parser ignores the key).",
+    "Each shot becomes a user turn (the question) and an assistant turn (the answer re-encoded compactly, key order kept). Keep exactly three; mined rows are added at runtime by the evening close.",
+    "Shot 2 shows a single month value (YYYY-MM). Shot 3 shows the coverage rule on a two-part question (reps are HR's, so skip them; only units) and a period range (last quarter = 2026-07..2026-09 in the demo year). Placed last, measured on the NPU (Wave 4): the Q1 sentence then ends after one intent (68 tokens) instead of adding a rep count (121 tokens, past the 4.5 s budget)."
+  ],
+  "role": "SALES",
+  "shots": [
+    {
+      "question": "How many employees do we have?",
+      "answer": {
+        "not_relevant": true
+      }
+    },
+    {
+      "question": "Revenue in March in the West",
+      "answer": {
+        "skip": [],
+        "intents": [
+          {
+            "table": "sales",
+            "metric": "sum",
+            "column": "revenue",
+            "filters": [
+              {
+                "column": "month",
+                "op": "eq",
+                "value": "2026-03"
+              },
+              {
+                "column": "region",
+                "op": "eq",
+                "value": "West"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "question": "Units sold per region last quarter, and how many reps per region?",
+      "answer": {
+        "skip": [
+          "reps"
+        ],
+        "intents": [
+          {
+            "table": "sales",
+            "metric": "sum",
+            "column": "units",
+            "group_by": [
+              "region"
+            ],
+            "filters": [
+              {
+                "column": "month",
+                "op": "gte",
+                "value": "2026-07"
+              },
+              {
+                "column": "month",
+                "op": "lte",
+                "value": "2026-09"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

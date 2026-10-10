@@ -1,0 +1,31 @@
+{
+  "id": "invoice_inbox",
+  "version": "1",
+  "title": "Invoice inbox",
+  "produces": "One row per invoice in t_invoices; blurry or non-invoice pages go to the review list",
+  "axis": "shard",
+  "merge": "concat",
+  "input": "files",
+  "itemKinds": ["image", "pdf"],
+  "sink": "table",
+  "table": "t_invoices",
+  "replicate": "sample:0.1",
+  "stages": [
+    {"id": "iqa", "op": "IQA", "params": {"item": "{item}"}},
+    {"id": "prep", "op": "IMG_PREPROC", "params": {"item": "{item}", "steps": ["exif_rotate", "deskew", "doc_crop", "resize:1600"]}, "inputs": ["iqa"]},
+    {"id": "ocr", "op": "OCR", "params": {"item": "{item}"}, "inputs": ["prep"]},
+    {"id": "layout", "op": "LAYOUT", "inputs": ["ocr"]},
+    {"id": "class", "op": "DOC_CLASSIFY", "inputs": ["layout"]},
+    {"id": "fields", "op": "METADATA", "params": {"class": "invoice"}, "inputs": ["layout", "class"]}
+  ],
+  "outputSchema": [
+    {"name": "vendor", "type": "TEXT", "groupable": true},
+    {"name": "invoice_no", "type": "TEXT", "identifier": true},
+    {"name": "date", "type": "TEXT"},
+    {"name": "total", "type": "REAL"},
+    {"name": "status", "type": "TEXT", "groupable": true},
+    {"name": "gstin", "type": "TEXT", "identifier": true},
+    {"name": "doc_class", "type": "TEXT", "groupable": true},
+    {"name": "verdict", "type": "TEXT", "groupable": true}
+  ]
+}

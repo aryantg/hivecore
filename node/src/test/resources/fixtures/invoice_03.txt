@@ -1,0 +1,12 @@
+Kavya Textiles
+TAX INVOICE
+Invoice No: 3391
+Date: 7 Oct 2026
+Bill to: Meridian Traders Pvt Ltd
+Uniform shirts x 60  ₹ 26,334.00
+Embroidery x 60  ₹ 15,801.00
+Courier  ₹ 10,534.00
+Subtotal: ₹ 52,669.00
+GST 18%: ₹ 9,481.00
+Total: INR 62,150
+Status: DUE

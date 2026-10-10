@@ -1,0 +1,26 @@
+{
+  "id": "site_photo_audit",
+  "version": "1",
+  "title": "Site photo audit",
+  "produces": "One row per photo in t_job_site_audit: people, helmets, vests and a safety verdict",
+  "axis": "shard",
+  "merge": "concat",
+  "input": "images",
+  "itemKinds": ["image"],
+  "sink": "table",
+  "table": "t_job_site_audit",
+  "replicate": "sample:0.1",
+  "stages": [
+    {"id": "iqa", "op": "IQA", "params": {"item": "{item}"}},
+    {"id": "detect", "op": "DETECT", "params": {"item": "{item}", "labels": ["person", "helmet", "vest"], "minScore": 0.4}, "inputs": ["iqa"]},
+    {"id": "tag", "op": "TAG", "params": {"item": "{item}", "vocabulary": "owner:site_tags", "minScore": 0.25}, "inputs": ["iqa"]},
+    {"id": "ask", "op": "VLM_ASK", "params": {"item": "{item}", "question": "Is every person wearing a safety helmet?", "options": ["yes", "no", "unclear"]}, "inputs": ["detect"]}
+  ],
+  "outputSchema": [
+    {"name": "site", "type": "TEXT", "groupable": true},
+    {"name": "persons", "type": "INTEGER"},
+    {"name": "helmets", "type": "INTEGER"},
+    {"name": "vests", "type": "INTEGER"},
+    {"name": "verdict", "type": "TEXT", "groupable": true}
+  ]
+}
