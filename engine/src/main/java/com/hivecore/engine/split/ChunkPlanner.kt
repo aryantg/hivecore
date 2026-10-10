@@ -7,6 +7,7 @@ import com.hivecore.core.Dag
 import com.hivecore.core.Op
 import com.hivecore.core.OpClass
 import com.hivecore.core.OpClasses
+import com.hivecore.core.OpRegistry
 import com.hivecore.core.Profile
 import com.hivecore.core.Recipe
 import com.hivecore.core.TaskSpec
@@ -17,9 +18,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * A job to split (§4B): one op with pinned params over one input. [owner] holds the data (default: the commander);
- * private inputs never leave it. Sizing overrides: [chunks] (exact number of chunks), [unitsPerChunk], [unitMs]
- * (expected ms per unit when no BENCH p50 is known).
+ * A job to split (spec section 10.1): one op with pinned params over one input. [owner] holds the data (default: the
+ * orchestrator); private inputs never leave it. Sizing overrides: [chunks] (exact number of chunks), [unitsPerChunk],
+ * [unitMs] (expected ms per unit when no benchmark exists). [capability] names the catalog capability (default: the
+ * registry's for the op) and [modelSha256] the model build placement resolved (section 10.3: part of every chunk id;
+ * [modelId] stands in for it until placement ran). [replicas] pins the replicas per chunk (default: the registry's,
+ * 2 for LLM and VLM ops, section 12.1).
  */
 @Serializable data class SplitJob(
     val jobId: String,
@@ -32,8 +36,14 @@ import kotlinx.serialization.json.JsonPrimitive
     val chunks: Int? = null,
     val unitsPerChunk: Int? = null,
     val unitMs: Double? = null,
+    val capability: String? = null,
+    val modelSha256: String? = null,
+    val replicas: Int? = null,
 ) {
-    val opKey: String get() = op.name + "@" + (modelId ?: "")
+    /** `op@modelSha256` (section 10.3); the model id stands in until placement resolved the build. */
+    val opKey: String get() = op.name + "@" + (modelSha256 ?: modelId ?: "")
+    /** The capability the op needs (section 4.3), from the job or the op registry. */
+    val cap: String? get() = capability ?: OpRegistry[op].capability
 
     companion object {
         /**
@@ -56,11 +66,15 @@ data class SplitPlan(
     val dag: Dag,
     /** the data holder: private chunks run only here */
     val owner: String,
-    /** phones that may pull chunks (eligible for the op class, plus the commander) */
+    /** phones that may pull chunks (MODEL_READY for the capability, or eligible for the op class, plus the orchestrator) */
     val eligible: List<String>,
-    /** expected ms per unit on each phone (BENCH p50, or the default) */
+    /** expected ms per unit on each phone (job override, profile p50, catalog unitMsP50, or the default) */
     val unitMs: Map<String, Double>,
     val defaultUnitMs: Double,
+    /** replicas per chunk (section 12.1): 2 for LLM / VLM, else 1 */
+    val replicas: Int = 1,
+    /** the sentence overlap the text splitter used (a re-cut text chunk is cut the same way) */
+    val overlap: Int = 0,
 ) {
     fun expectedMs(c: Chunk, node: String): Double = c.units * (unitMs[node] ?: defaultUnitMs)
 
@@ -70,18 +84,33 @@ data class SplitPlan(
 
     /** Expected time of the whole job on [node] alone (the speed-up baseline). */
     fun singlePhoneMs(node: String): Double = chunks.sumOf { expectedMs(it, node) }
+
+    /** Section 14: halves [c] once at a unit boundary; the children take indices from [firstIndex]. Null when it cannot be halved. */
+    fun recut(c: Chunk, firstIndex: Int): List<Chunk>? = Splitters.recut(job.opKey, job.params, job.input, c, overlap, firstIndex)
 }
 
 /**
- * Swarm plan §4B.3 chunk sizing: chunks of about [targetMs] (20–40 s) of work on a median eligible phone, computed
- * from Profile.p50[modelId] (BENCH) or per-class defaults, and always at least 2 × eligible phones chunks (when the
- * input has that many units) so fast phones take more. TREE jobs use a fixed sentence count per chunk
- * (`params.chunkSentences`, default 40) so the tree, and therefore the summary, is the same on 2 or 3 phones.
- * Audio windows are capped at 28 s owned (+1 s overlap each side ≤ 30 s per Whisper call).
+ * Spec section 10.5 chunk sizing: chunks of about [targetMs] (30 s) of work on a median eligible phone, and always at
+ * least 2 × eligible phones chunks (when the input has that many units) so fast phones take more.
+ *
+ *  - Eligible phones = the caller's `ready` set (phones with MODEL_READY for the op's capability, from placement)
+ *    plus the orchestrator; with no ready set (no placement ran) the profile view: phones eligible for the op class
+ *    plus the orchestrator.
+ *  - Expected ms per unit per phone = `job.unitMs`, else that phone's profile `p50` for the model (or capability),
+ *    else the catalog `unitMsP50` through `unitMsOf(nodeId, capability)`, else the default by kind (section 20.2).
+ *    The median across eligible phones drives sizing.
+ *  - TREE uses a fixed 40 sentences per chunk so the tree, and therefore the summary, is identical on any phone
+ *    count; audio windows are capped at 28 s owned (+1 s overlap each side).
  */
-class ChunkPlanner(private val targetMs: Double = 30_000.0) {
+class ChunkPlanner(private val targetMs: Double = SplitConstants.TARGET_CHUNK_MS) {
 
-    fun plan(job: SplitJob, profiles: List<Profile>, self: String): Result<SplitPlan> = runCatching {
+    fun plan(
+        job: SplitJob,
+        profiles: List<Profile>,
+        self: String,
+        ready: Set<String>? = null,
+        unitMsOf: (nodeId: String, capability: String) -> Double? = { _, _ -> null },
+    ): Result<SplitPlan> = runCatching {
         val axis = when (job.input) {
             is SplitInput.Items, is SplitInput.Blobs -> SplitAxis.SHARD
             is SplitInput.Seeds, is SplitInput.FanOut -> SplitAxis.FANOUT
@@ -93,11 +122,18 @@ class ChunkPlanner(private val targetMs: Double = 30_000.0) {
             SplitAxis.FANOUT -> Mergeability.fanOutKind(job.op)
         } ?: throw IllegalArgumentException("${job.op} cannot be split along the ${axis.name.lowercase()} axis")
         val owner = job.owner ?: self
-        val probe = TaskSpec("probe", job.op, job.params, modelId = job.modelId)
         val ps = SchedulerImpl.normalise(profiles)
-        val eligible = (SchedulerImpl().candidates(probe, ps, self, emptySet()).map { it.nodeId } + self).distinct().sorted()
+        val cap = job.cap
+        val byProfile = { SchedulerImpl().candidates(TaskSpec("probe", job.op, job.params, modelId = job.modelId), ps, self, emptySet()).map { it.nodeId } }
+        val eligible = ((ready?.toList() ?: byProfile()) + self).distinct().sorted()
         val def = job.unitMs ?: defaultUnitMs(job.op, job.input)
-        val unitMs = eligible.associateWith { n -> job.unitMs ?: job.modelId?.let { m -> ps.firstOrNull { it.nodeId == n }?.p50?.get(m) } ?: def }
+        val unitMs = eligible.associateWith { n ->
+            val p = ps.firstOrNull { it.nodeId == n }
+            job.unitMs
+                ?: job.modelId?.let { m -> p?.p50?.get(m) }
+                ?: cap?.let { c -> p?.p50?.get(c) ?: unitMsOf(n, c) }
+                ?: def
+        }
         val median = unitMs.values.sorted().let { if (it.isEmpty()) def else it[it.size / 2] }
         val n = Splitters.units(job.input)
         require(n > 0) { "the input is empty" }
@@ -107,16 +143,17 @@ class ChunkPlanner(private val targetMs: Double = 30_000.0) {
             kind == MergeKind.TREE -> (job.params["chunkSentences"] as? JsonPrimitive)?.content?.toIntOrNull() ?: DEFAULT_TREE_SENTENCES
             else -> {
                 var p = Math.round(targetMs / median).toInt().coerceIn(1, n)
-                val minChunks = 2 * eligible.size
+                val minChunks = SplitConstants.MIN_CHUNKS_PER_PHONE * eligible.size
                 if (ceilDiv(n, p) < minChunks) p = maxOf(1, ceilDiv(n, minChunks))
                 p
             }
         }.coerceAtLeast(1)
         val base = job.params
+        val overlap = (job.input as? SplitInput.Text)?.let { it.overlap ?: if (kind == MergeKind.TREE) 0 else 1 } ?: 0
         val chunks = when (val inp = job.input) {
             is SplitInput.Items -> Splitters.items(job.opKey, base, inp, per)
             is SplitInput.Blobs -> Splitters.blobs(job.opKey, base, inp, per)
-            is SplitInput.Text -> Splitters.text(job.opKey, base, inp, per, inp.overlap ?: if (kind == MergeKind.TREE) 0 else 1)
+            is SplitInput.Text -> Splitters.text(job.opKey, base, inp, per, overlap)
             is SplitInput.Audio -> Splitters.audio(job.opKey, base, inp, minOf(per, MAX_AUDIO_S) * 1000L)
             is SplitInput.Video -> Splitters.video(job.opKey, base, inp, per)
             is SplitInput.Image -> Splitters.image(job.opKey, base, inp, per)
@@ -124,7 +161,8 @@ class ChunkPlanner(private val targetMs: Double = 30_000.0) {
             is SplitInput.Seeds -> Splitters.seeds(job.opKey, base, inp, per)
             is SplitInput.FanOut -> Splitters.fanOut(job.opKey, base, inp)
         }
-        val tmp = SplitPlan(job, axis, kind, chunks, Dag("", "", emptyList(), ""), owner, eligible, unitMs, def)
+        val replicas = (job.replicas ?: OpRegistry[job.op].replicas).coerceIn(1, SplitConstants.MAX_REPLICAS)
+        val tmp = SplitPlan(job, axis, kind, chunks, Dag("", "", emptyList(), ""), owner, eligible, unitMs, def, replicas, overlap)
         tmp.copy(dag = dag(tmp))
     }
 
@@ -157,21 +195,21 @@ class ChunkPlanner(private val targetMs: Double = 30_000.0) {
 
     companion object {
         const val PATTERNS_VERSION = "split-1"
-        const val DEFAULT_TREE_SENTENCES = 40
-        const val MAX_AUDIO_S = 28
+        const val DEFAULT_TREE_SENTENCES = SplitConstants.TREE_SENTENCES
+        const val MAX_AUDIO_S = SplitConstants.MAX_AUDIO_S
 
         fun ceilDiv(a: Int, b: Int): Int = (a + b - 1) / b
 
-        /** Expected ms per unit with no BENCH figure (§6.2 defaults, per unit of the input kind). */
+        /** Expected ms per unit with no benchmark or catalog figure (section 20.2 defaults, per unit of the input kind). */
         fun defaultUnitMs(op: Op, input: SplitInput): Double = when (input) {
-            is SplitInput.Table -> 0.05                    // per row, SQL partial aggregate
-            is SplitInput.Audio -> 100.0                   // per second of audio (Whisper-class ASR)
-            is SplitInput.Image -> 50.0                    // per tile
+            is SplitInput.Table -> SplitConstants.UNIT_MS_ROW
+            is SplitInput.Audio -> SplitConstants.UNIT_MS_AUDIO_S
+            is SplitInput.Image -> SplitConstants.UNIT_MS_TILE
             else -> when (OpClasses.of(op)) {
-                OpClass.LLM -> 4_000.0
-                OpClass.VLM -> 1_500.0
-                OpClass.HEAVY -> SchedulerImpl.DEFAULT_HEAVY_P50_MS
-                else -> SchedulerImpl.DEFAULT_P50_MS
+                OpClass.LLM -> SplitConstants.UNIT_MS_LLM
+                OpClass.VLM -> SplitConstants.UNIT_MS_VLM
+                OpClass.HEAVY -> SplitConstants.UNIT_MS_HEAVY
+                else -> SplitConstants.UNIT_MS_OTHER
             }
         }
     }

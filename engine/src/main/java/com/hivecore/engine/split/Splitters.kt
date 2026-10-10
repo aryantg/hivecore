@@ -16,8 +16,8 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 
 /**
- * What a split job runs over (§4B.1). Every input can be marked `private` (private mode, §7): its chunks never leave
- * the owner (the job's `owner`, default the commander). Default false: anything not marked private may be chunked out
+ * What a split job runs over (spec section 10.2). Every input can be marked `private`: its chunks never leave the
+ * owner (the job's `owner`, default the orchestrator). Default false: anything not marked private may be chunked out
  * to opted-in idle phones.
  */
 @Serializable sealed interface SplitInput {
@@ -35,7 +35,7 @@ import kotlinx.serialization.json.putJsonArray
 
     /**
      * One recording, cut into time windows of ≤ 28 s owned + [overlapMs] on each side (≤ 30 s per Whisper call), or,
-     * when [segments] (`[startMs, endMs]` from a VAD_SPLIT output, media/Vad) are given, one chunk per VAD segment.
+     * when [segments] (`[startMs, endMs]` from a VAD_SPLIT output) are given, one chunk per VAD segment.
      */
     @Serializable @SerialName("audio")
     data class Audio(val durationMs: Long, val blobId: String? = null, val overlapMs: Long = 1_000, val private: Boolean = false,
@@ -66,7 +66,8 @@ import kotlinx.serialization.json.putJsonArray
  * One chunk of a split job. [params] is overlaid on the job's params; [blobs] are the released items it reads.
  * [ownFrom, ownTo) is the slice of the input this chunk is responsible for in the merge (items, sentences, ms,
  * frames, tiles, rows, seeds); [overlapBefore]/[overlapAfter] the extra context it sees on each side.
- * `chunkId = sha256(op | params | slice)` makes chunks idempotent across retries, duplicates and jobs.
+ * `chunkId = sha256(op@modelSha256 | params | slice | blobIds)` (section 10.3) makes chunks idempotent across
+ * retries, duplicates and jobs. [recutOf] names the parent after an adaptive re-cut (section 14).
  */
 @Serializable data class Chunk(
     val index: Int,
@@ -81,12 +82,13 @@ import kotlinx.serialization.json.putJsonArray
     /** bytes that must travel to a remote phone (inline params + blobs) */
     val bytes: Long = 0,
     val private: Boolean = false,
+    val recutOf: Int? = null,
 )
 
 /** Deterministic splitters: same input + same chunk size ⇒ same chunks, same ids, on every phone. */
 object Splitters {
 
-    /** sha256 over the op key (op + model), the job's pinned params and the chunk's slice. */
+    /** sha256 over the op key (op@modelSha256), the job's pinned params, the chunk's slice and its blob ids (section 10.3). */
     fun chunkId(opKey: String, jobParams: JsonObject, slice: JsonObject, blobs: List<String>): String =
         Canon.sha256Hex(opKey + "|" + Canon.canonical(jobParams) + "|" + Canon.canonical(slice) + "|" + blobs.joinToString(","))
 
@@ -100,16 +102,18 @@ object Splitters {
     }
 
     private fun chunk(i: Int, opKey: String, base: JsonObject, slice: JsonObject, blobs: List<String>, units: Int, from: Long, to: Long,
-                      before: Long = 0, after: Long = 0, bytes: Long = 0, private: Boolean = false) =
+                      before: Long = 0, after: Long = 0, bytes: Long = 0, private: Boolean = false, recutOf: Int? = null) =
         Chunk(i, chunkId(opKey, base, slice, blobs), slice, blobs, units, from, to, before, after,
-            bytes + Canon.canonical(slice).length, private)
+            bytes + Canon.canonical(slice).length, private, recutOf)
 
     /** Shards of [per] items under params[key]. */
     fun items(opKey: String, base: JsonObject, input: SplitInput.Items, per: Int): List<Chunk> =
-        ranges(input.items.size, per).mapIndexed { i, (a, b) ->
-            val slice = JsonObject(mapOf(input.key to JsonArray(input.items.subList(a, b))))
-            chunk(i, opKey, base, slice, emptyList(), b - a, a.toLong(), b.toLong(), private = input.private)
-        }
+        ranges(input.items.size, per).mapIndexed { i, (a, b) -> itemsChunk(i, opKey, base, input, a, b) }
+
+    private fun itemsChunk(i: Int, opKey: String, base: JsonObject, input: SplitInput.Items, a: Int, b: Int, recutOf: Int? = null): Chunk {
+        val slice = JsonObject(mapOf(input.key to JsonArray(input.items.subList(a, b))))
+        return chunk(i, opKey, base, slice, emptyList(), b - a, a.toLong(), b.toLong(), private = input.private, recutOf = recutOf)
+    }
 
     /** Shards of [per] blobs; a chunk never mixes private and public blobs (boundaries also fall where privacy changes). */
     fun blobs(opKey: String, base: JsonObject, input: SplitInput.Blobs, per: Int): List<Chunk> {
@@ -119,13 +123,15 @@ object Splitters {
         var s = 0
         for (i in 1..ids.size) if (i == ids.size || priv(i) != priv(s)) { if (i > s) runs += s to i; s = i }
         val out = ArrayList<Chunk>()
-        for ((ra, rb) in runs) for ((a, b) in ranges(rb - ra, per)) {
-            val from = ra + a; val to = ra + b
-            val bl = ids.subList(from, to)
-            val bytes = (from until to).sumOf { input.sizes.getOrElse(it) { 0L } }
-            out += chunk(out.size, opKey, base, JsonObject(emptyMap()), bl, to - from, from.toLong(), to.toLong(), bytes = bytes, private = priv(from))
-        }
+        for ((ra, rb) in runs) for ((a, b) in ranges(rb - ra, per)) out += blobsChunk(out.size, opKey, base, input, ra + a, ra + b)
         return out
+    }
+
+    private fun blobsChunk(i: Int, opKey: String, base: JsonObject, input: SplitInput.Blobs, from: Int, to: Int, recutOf: Int? = null): Chunk {
+        val bl = input.blobIds.subList(from, to)
+        val bytes = (from until to).sumOf { input.sizes.getOrElse(it) { 0L } }
+        return chunk(i, opKey, base, JsonObject(emptyMap()), bl, to - from, from.toLong(), to.toLong(), bytes = bytes,
+            private = input.private.getOrElse(from) { false }, recutOf = recutOf)
     }
 
     /** Sentence units of a text: `{doc, unit: "s<i>", text}`, one per sentence, in order. */
@@ -138,11 +144,13 @@ object Splitters {
      */
     fun text(opKey: String, base: JsonObject, input: SplitInput.Text, per: Int, overlap: Int): List<Chunk> {
         val units = sentenceUnits(input.doc, input.text)
-        return ranges(units.size, per).mapIndexed { i, (a, b) ->
-            val from = maxOf(0, a - overlap)
-            val slice = JsonObject(mapOf("units" to JsonArray(units.subList(from, b))))
-            chunk(i, opKey, base, slice, emptyList(), b - a, a.toLong(), b.toLong(), before = (a - from).toLong(), private = input.private)
-        }
+        return ranges(units.size, per).mapIndexed { i, (a, b) -> textChunk(i, opKey, base, input, units, a, b, overlap) }
+    }
+
+    private fun textChunk(i: Int, opKey: String, base: JsonObject, input: SplitInput.Text, units: List<JsonObject>, a: Int, b: Int, overlap: Int, recutOf: Int? = null): Chunk {
+        val from = maxOf(0, a - overlap)
+        val slice = JsonObject(mapOf("units" to JsonArray(units.subList(from, b))))
+        return chunk(i, opKey, base, slice, emptyList(), b - a, a.toLong(), b.toLong(), before = (a - from).toLong(), private = input.private, recutOf = recutOf)
     }
 
     /** Time windows of [windowMs] (owned) plus [SplitInput.Audio.overlapMs] each side: params fromMs/toMs/ownFromMs/ownToMs. */
@@ -153,20 +161,24 @@ object Splitters {
         var a = 0L
         while (a < input.durationMs) {
             val b = minOf(input.durationMs, a + windowMs)
-            val from = maxOf(0L, a - input.overlapMs); val to = minOf(input.durationMs, b + input.overlapMs)
-            val slice = buildJsonObject {
-                put("i", out.size); put("startMs", from); put("endMs", to)      // media ASR: one shard per startMs/endMs
-                put("fromMs", from); put("toMs", to); put("ownFromMs", a); put("ownToMs", b)
-            }
-            out += chunk(out.size, opKey, base, slice, listOfNotNull(input.blobId), ((b - a + 999) / 1000).toInt(), a, b, a - from, to - b, private = input.private)
+            out += audioChunk(out.size, opKey, base, input, a, b)
             a = b
         }
         return out
     }
 
+    private fun audioChunk(i: Int, opKey: String, base: JsonObject, input: SplitInput.Audio, a: Long, b: Long, recutOf: Int? = null): Chunk {
+        val from = maxOf(0L, a - input.overlapMs); val to = minOf(input.durationMs, b + input.overlapMs)
+        val slice = buildJsonObject {
+            put("i", i); put("startMs", from); put("endMs", to)      // media ASR: one shard per startMs/endMs
+            put("fromMs", from); put("toMs", to); put("ownFromMs", a); put("ownToMs", b)
+        }
+        return chunk(i, opKey, base, slice, listOfNotNull(input.blobId), ((b - a + 999) / 1000).toInt(), a, b, a - from, to - b, private = input.private, recutOf = recutOf)
+    }
+
     /**
-     * One chunk per VAD segment (media/Vad already cut at quiet frames with 1 s overlap): params i/startMs/endMs. No
-     * owned-window filter; the ASR merge removes the overlap words with media/Stitch.
+     * One chunk per VAD segment (already cut at quiet frames with 1 s overlap): params i/startMs/endMs. No owned-window
+     * filter; the ASR merge removes the overlap words with the transcript stitcher.
      */
     private fun vadSegments(opKey: String, base: JsonObject, input: SplitInput.Audio): List<Chunk> =
         input.segments.mapIndexed { i, s ->
@@ -177,33 +189,41 @@ object Splitters {
 
     /** Frame ranges [frameFrom, frameTo). */
     fun video(opKey: String, base: JsonObject, input: SplitInput.Video, per: Int): List<Chunk> =
-        ranges(input.frames, per).mapIndexed { i, (a, b) ->
-            val slice = buildJsonObject { put("frameFrom", a); put("frameTo", b) }
-            chunk(i, opKey, base, slice, listOfNotNull(input.blobId), b - a, a.toLong(), b.toLong(), private = input.private)
-        }
+        ranges(input.frames, per).mapIndexed { i, (a, b) -> videoChunk(i, opKey, base, input, a, b) }
+
+    private fun videoChunk(i: Int, opKey: String, base: JsonObject, input: SplitInput.Video, a: Int, b: Int, recutOf: Int? = null): Chunk {
+        val slice = buildJsonObject { put("frameFrom", a); put("frameTo", b) }
+        return chunk(i, opKey, base, slice, listOfNotNull(input.blobId), b - a, a.toLong(), b.toLong(), private = input.private, recutOf = recutOf)
+    }
 
     /** Tile groups of the [Pixels.tilePlan] (VisionExecutor SUPERRES runs `params.tiles` and returns `tileOutputs`). */
     fun image(opKey: String, base: JsonObject, input: SplitInput.Image, per: Int): List<Chunk> {
         val plan = Pixels.tilePlan(input.w, input.h, input.tile, input.overlap)
-        return ranges(plan.tiles.size, per).mapIndexed { i, (a, b) ->
-            val slice = buildJsonObject { putJsonArray("tiles") { for (t in a until b) add(JsonPrimitive(t)) } }
-            chunk(i, opKey, base, slice, listOf(input.blobId), b - a, a.toLong(), b.toLong(), private = input.private)
-        }
+        return ranges(plan.tiles.size, per).mapIndexed { i, (a, b) -> imageChunk(i, opKey, base, input, a, b) }
+    }
+
+    private fun imageChunk(i: Int, opKey: String, base: JsonObject, input: SplitInput.Image, a: Int, b: Int, recutOf: Int? = null): Chunk {
+        val slice = buildJsonObject { putJsonArray("tiles") { for (t in a until b) add(JsonPrimitive(t)) } }
+        return chunk(i, opKey, base, slice, listOf(input.blobId), b - a, a.toLong(), b.toLong(), private = input.private, recutOf = recutOf)
     }
 
     /** Row ranges [rowFrom, rowTo) for partial aggregates. */
     fun table(opKey: String, base: JsonObject, input: SplitInput.Table, per: Int): List<Chunk> =
-        ranges(input.rows, per).mapIndexed { i, (a, b) ->
-            val slice = buildJsonObject { put("table", input.table); put("rowFrom", a); put("rowTo", b) }
-            chunk(i, opKey, base, slice, emptyList(), b - a, a.toLong(), b.toLong(), private = input.private)
-        }
+        ranges(input.rows, per).mapIndexed { i, (a, b) -> tableChunk(i, opKey, base, input, a, b) }
+
+    private fun tableChunk(i: Int, opKey: String, base: JsonObject, input: SplitInput.Table, a: Int, b: Int, recutOf: Int? = null): Chunk {
+        val slice = buildJsonObject { put("table", input.table); put("rowFrom", a); put("rowTo", b) }
+        return chunk(i, opKey, base, slice, emptyList(), b - a, a.toLong(), b.toLong(), private = input.private, recutOf = recutOf)
+    }
 
     /** Seed groups: chunk i runs `seeds` [base + a, base + b). */
     fun seeds(opKey: String, base: JsonObject, input: SplitInput.Seeds, per: Int): List<Chunk> =
-        ranges(input.n, per).mapIndexed { i, (a, b) ->
-            val slice = buildJsonObject { putJsonArray("seeds") { for (s in a until b) add(JsonPrimitive(input.base + s)) } }
-            chunk(i, opKey, base, slice, emptyList(), b - a, a.toLong(), b.toLong(), private = input.private)
-        }
+        ranges(input.n, per).mapIndexed { i, (a, b) -> seedsChunk(i, opKey, base, input, a, b) }
+
+    private fun seedsChunk(i: Int, opKey: String, base: JsonObject, input: SplitInput.Seeds, a: Int, b: Int, recutOf: Int? = null): Chunk {
+        val slice = buildJsonObject { putJsonArray("seeds") { for (s in a until b) add(JsonPrimitive(input.base + s)) } }
+        return chunk(i, opKey, base, slice, emptyList(), b - a, a.toLong(), b.toLong(), private = input.private, recutOf = recutOf)
+    }
 
     /** One chunk per variant (params overlay + `variant` index). */
     fun fanOut(opKey: String, base: JsonObject, input: SplitInput.FanOut): List<Chunk> =
@@ -211,6 +231,37 @@ object Splitters {
             val slice = JsonObject(v + ("variant" to JsonPrimitive(i)))
             chunk(i, opKey, base, slice, emptyList(), 1, i.toLong(), i + 1L, private = input.private)
         }
+
+    /**
+     * Spec section 14 adaptive re-cut: [c] halved once at a unit boundary into two child chunks (indices [firstIndex]
+     * and [firstIndex] + 1, `recutOf = c.index`), cut exactly as a fresh cut of that size would be so their ids match
+     * the memo. Null when the chunk is one unit, a VAD segment, a fan-out variant, or an audio window under 2 s.
+     */
+    fun recut(opKey: String, base: JsonObject, input: SplitInput, c: Chunk, overlap: Int, firstIndex: Int): List<Chunk>? {
+        if (c.units < 2 || c.ownTo - c.ownFrom < 2) return null
+        val a = c.ownFrom; val b = c.ownTo
+        val k = firstIndex; val p = c.index
+        return when (input) {
+            is SplitInput.Items -> { val m = mid(a, b).toInt(); listOf(itemsChunk(k, opKey, base, input, a.toInt(), m, p), itemsChunk(k + 1, opKey, base, input, m, b.toInt(), p)) }
+            is SplitInput.Blobs -> { val m = mid(a, b).toInt(); listOf(blobsChunk(k, opKey, base, input, a.toInt(), m, p), blobsChunk(k + 1, opKey, base, input, m, b.toInt(), p)) }
+            is SplitInput.Text -> {
+                val units = sentenceUnits(input.doc, input.text); val m = mid(a, b).toInt()
+                listOf(textChunk(k, opKey, base, input, units, a.toInt(), m, overlap, p), textChunk(k + 1, opKey, base, input, units, m, b.toInt(), overlap, p))
+            }
+            is SplitInput.Audio -> {
+                if (input.segments.isNotEmpty() || b - a < 2_000) return null
+                val m = a + (b - a) / 2_000 * 1_000
+                listOf(audioChunk(k, opKey, base, input, a, m, p), audioChunk(k + 1, opKey, base, input, m, b, p))
+            }
+            is SplitInput.Video -> { val m = mid(a, b).toInt(); listOf(videoChunk(k, opKey, base, input, a.toInt(), m, p), videoChunk(k + 1, opKey, base, input, m, b.toInt(), p)) }
+            is SplitInput.Image -> { val m = mid(a, b).toInt(); listOf(imageChunk(k, opKey, base, input, a.toInt(), m, p), imageChunk(k + 1, opKey, base, input, m, b.toInt(), p)) }
+            is SplitInput.Table -> { val m = mid(a, b).toInt(); listOf(tableChunk(k, opKey, base, input, a.toInt(), m, p), tableChunk(k + 1, opKey, base, input, m, b.toInt(), p)) }
+            is SplitInput.Seeds -> { val m = mid(a, b).toInt(); listOf(seedsChunk(k, opKey, base, input, a.toInt(), m, p), seedsChunk(k + 1, opKey, base, input, m, b.toInt(), p)) }
+            is SplitInput.FanOut -> null
+        }
+    }
+
+    private fun mid(a: Long, b: Long): Long = a + (b - a) / 2
 
     /** Short human label of [c]'s slice of [input] (1-based ranges). */
     fun label(input: SplitInput, c: Chunk): String {
