@@ -256,6 +256,8 @@ class Patterns(val library: PatternLibrary) {
         const val ASSET_PATH = "swarm/patterns.json"
         const val MONTH = "month"
         val CONFIDENTIAL_METRICS = setOf("avg", "count")
+        /** Capabilities the shipped text patterns' ops run on (AGG, DOC, EXTRACT and the reduces), for a facade without the library. */
+        val DEFAULT_COVERED_CAPABILITIES = setOf("llm.json", "llm.text")
         private val json = Json { ignoreUnknownKeys = true }
         private val SLOT = Regex("\\{([a-z_0-9]+)\\}")
         private val FRAGMENT = Regex("\\[([^\\[\\]]*)\\]")

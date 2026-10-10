@@ -15,7 +15,10 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 /** Failure of [PlannerImpl.plan]; the message is shown as the refusal. */
-class PlanFailed(message: String) : Exception(message)
+open class PlanFailed(message: String) : Exception(message)
+
+/** T1 found no pattern for the question: one of the spec 7.2 reasons for the facade to ask T2. */
+class NoPatternFits(message: String) : PlanFailed(message)
 
 /**
  * Question → DAG (swarm plan §5.1). The LLM only ever answers closed questions; every option comes from the pattern
@@ -54,7 +57,7 @@ class PlannerImpl(
         val today = Instant.ofEpochMilli(clock()).atZone(zone).toLocalDate()
         val routeOps = route.cues.map { it.op }.toSet()
         val compatible = patterns.textPatterns.filter { compatible(it, routeOps, q) }
-        if (compatible.isEmpty()) return fail(nothingFits())
+        if (compatible.isEmpty()) return Result.failure(NoPatternFits(nothingFits()))
 
         val confidences = ArrayList<Double>()
         var clarification: List<String> = emptyList()
@@ -64,7 +67,7 @@ class PlannerImpl(
         val pp = ask("Which plan fits the question \"${question.trim()}\"?", options, { it?.let { p -> "${p.id}: ${p.title}" } ?: "none: none of these fits" })
         if (!pp.anyVote) return fail("could not choose a plan for this question (no valid answer from the model)")
         confidences += pp.confidence
-        val pattern = (pp.value ?: pp.top.first()) ?: return fail(nothingFits())
+        val pattern = (pp.value ?: pp.top.first()) ?: return Result.failure(NoPatternFits(nothingFits()))
         if (pp.value == null || pp.confidence < Confidence.LOW) {
             clarification = pp.top.take(2).map { it?.title ?: "none of these" }
             if (clarification.size < 2) clarification = clarification + compatible.map { it.title }.filter { it !in clarification }.take(2 - clarification.size)

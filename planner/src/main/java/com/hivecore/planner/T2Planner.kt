@@ -55,6 +55,8 @@ object T2Params {
     const val MAX_TOKENS = "maxTokens"
     /** never allowed (rule C2): a node may not ask for the cloud; the compiler rejects any task carrying it */
     const val EXEC = "exec"
+    /** conditional edges into the node (spec 7.3): `{producerId: "if_empty" | "if_confidence_below:<x>" | "if_count_above:<n>"}`; absent = always */
+    const val WHEN = "when"
 
     const val PATTERN_ID = "t2"
     const val VERSION = "t2-graph-1"
@@ -73,14 +75,17 @@ object PlanKeys {
         Canon.sha256Hex(question.trim().lowercase() + catalogHash(catalogs) + capabilityHash(capabilities))
 }
 
-/** A small LRU plan cache keyed by [PlanKeys.key]; entries keep their tier (`PlannedQuestion.tier`). */
+/** A cached plan (spec 7.2): the plan and the tier that produced it ("T1" | "T2"). */
+data class CachedPlan(val plan: PlannedQuestion, val tier: String)
+
+/** A small LRU plan cache keyed by [PlanKeys.key]; entries record their tier (spec 7.2). */
 class PlanCache(private val max: Int = 64) {
-    private val map = LinkedHashMap<String, PlannedQuestion>(16, 0.75f, true)
+    private val map = LinkedHashMap<String, CachedPlan>(16, 0.75f, true)
 
-    @Synchronized fun get(key: String): PlannedQuestion? = map[key]
+    @Synchronized fun get(key: String): CachedPlan? = map[key]
 
-    @Synchronized fun put(key: String, plan: PlannedQuestion) {
-        map[key] = plan
+    @Synchronized fun put(key: String, plan: PlannedQuestion, tier: String) {
+        map[key] = CachedPlan(plan, tier)
         while (map.size > max) map.remove(map.keys.first())
     }
 

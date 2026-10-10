@@ -39,6 +39,8 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.androidx.security.crypto)
     testImplementation(libs.okhttp.mockwebserver)
+    // spec 18.2 boundary test: asserts through reflection that the OpenRouter client's constructor is internal
+    testImplementation(kotlin("reflect"))
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.sqlite.jdbc)
