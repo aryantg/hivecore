@@ -52,6 +52,8 @@ object SplitConstants {
     const val UNIT_MS_VLM = 1_500.0
     const val UNIT_MS_HEAVY = 3_000.0
     const val UNIT_MS_OTHER = 200.0
+    /** BENCH: one model loaded and run `runs` times (phone gate finding: the default made every bench chunk miss its deadline) */
+    const val UNIT_MS_BENCH = 60_000.0
     /** TASK_RESULT error classes (section 14). */
     const val ERR_OOM = "oom"
     const val ERR_MODEL_LOAD = "model_load"

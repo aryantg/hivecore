@@ -12,6 +12,7 @@ import com.hivecore.core.Verify
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -314,7 +315,22 @@ class SecureTransport(
         inboundReady.await()
         inner.setPairingMode(synchronized(lock) { pairingMode })
         inner.start(localName)
-        synchronized(lock) { collectors += scope.launch { inner.connected.collect { onInnerConnected(it) } } }
+        synchronized(lock) {
+            collectors += scope.launch { inner.connected.collect { onInnerConnected(it) } }
+            // A handshake that never completed (a lost or crossed frame) is dropped after the handshake timeout and
+            // started again while the link is still there; otherwise the link stays dead for good.
+            collectors += scope.launch {
+                while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                    kotlinx.coroutines.delay(handshakeTimeoutMs / 3)
+                    val stale = synchronized(lock) {
+                        val now = clock()
+                        pending.filterValues { now - it.startedAt > handshakeTimeoutMs }.keys.toList().also { ks -> ks.forEach { pending.remove(it) } }
+                            .mapNotNull { k -> innerConnected.firstOrNull { key(it) == k && k !in byEndpoint } }
+                    }
+                    for (ep in stale) { SLog.d(TAG, "handshake with ${ep.displayName} timed out; starting again"); initiate(ep) }
+                }
+            }
+        }
     }
 
     override suspend fun stop() {
@@ -475,6 +491,9 @@ class SecureTransport(
     }
 
     private suspend fun initiate(ep: PeerEndpoint) {
+        // Phone gate finding: when the peer's INIT arrived first we are already its responder; starting our own
+        // handshake then overwrote that state, its FIN found no responder, and both sides stayed pending for good.
+        synchronized(lock) { if (pending[key(ep)]?.initiator == false || key(ep) in byEndpoint) return }
         val e = NoiseCrypto.ephemeral()
         val hs = Handshake(ep, initiator = true, e = e, eDer = e.public.encoded, startedAt = clock())
         val frame = Bytes().u8(TAG_INIT).u8(PROTO).blob(hs.eDer).bytes()

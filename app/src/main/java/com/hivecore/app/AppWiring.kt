@@ -462,6 +462,7 @@ object AppWiring {
             recipeDefs = recipes, clock = clock,
             privateTables = { store.privateTables() }, privateDocs = { store.privateDocs() },
             journal = journal, memo = memo, escalator = escalator,
+            modelItems = { (registry.installed().map { it.id } + listOfNotNull(ModelPoolImpl.LLM_QAIRT_ID.takeIf { llm.backend.value != null })).distinct().map { JsonPrimitive(it) } },
             readyFor = { cap -> coordinators.values.flatMap { it.ready(cap) }.toSet().takeIf { it.isNotEmpty() } },
             unitMsOf = { node, cap -> catalog.preferred(cap)?.let { e -> graph.node.beacon?.profileOf(node)?.p50?.get(e.modelId) ?: e.unitMsP50.toDouble() } },
             allowMobileData = { prefs.getBoolean(SettingsKeys.MOBILE_DATA_BLOBS, false) },
@@ -477,7 +478,9 @@ object AppWiring {
         registeredOps.value = graph.executors.flatMap { it.ops }.toSet()
         if (authoriser != null) {
             node.onPlanSeen = authoriser::onPlanSeen
-            node.taskAuthoriser = authoriser::authorise
+            // P10 covers tasks from other phones; this phone's own chunks come from its own commander in-process and
+            // carry no PLAN (phone gate finding: the orchestrator refused every chunk it gave itself).
+            node.taskAuthoriser = { body, from -> if (from == selfId) null else authoriser.authorise(body, from) }
             authoriser.onWarning = { peer, n -> warn("${router.peerName(peer) ?: peer.take(8)} sent $n unauthorised tasks in a minute") }
         }
         if (Features.runtime && pool is CapabilityPool) node.onModelReq = ModelReqHandler(selfId, { catalog }, pool, scope, cooldowns) { graph.policy.optIn.value }::handle

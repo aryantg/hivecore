@@ -40,7 +40,8 @@ object RecipeJobs {
         val jobs = runnable.map { st ->
             val key = if (st.op == Op.EVAL) "cases" else "items"
             val params = JsonObject(st.params.filterKeys { it != key && it != "item" })
-            SplitJob("$jobId/${st.id}", st.op, params, st.modelId, SplitInput.Items(items, key = key, private = private), owner = owner)
+            SplitJob("$jobId/${st.id}", st.op, params, st.modelId, SplitInput.Items(items, key = key, private = private), owner = owner,
+                unitMs = if (st.op == Op.BENCH) com.hivecore.engine.split.SplitConstants.UNIT_MS_BENCH else null)
         }
         return Staged(jobs, skipped.map { it.id })
     }

@@ -135,6 +135,8 @@ class SwarmNode(
     var recipeDefs: (String) -> com.hivecore.engine.workload.RecipeDef? = { null }
     /** Items for recipes whose input is "none" (the EVAL sweep: the question sets as EvalCase JSON). */
     var evalCases: () -> List<JsonElement> = { emptyList() }
+    /** The installed model ids as items for a recipe over `model` items (BENCH); phone gate finding: `bench_all` had no item source. */
+    var modelItems: () -> List<JsonElement> = { emptyList() }
     /** Private mode (§7): tables and documents (ids and names) the owner marked private; their chunks never leave this phone. */
     var privateTables: () -> Set<String> = { emptySet() }
     var privateDocs: () -> Set<String> = { emptySet() }
@@ -193,7 +195,7 @@ class SwarmNode(
                             runStages(jobId, RecipeJobs.promptJobs(jobId, r, prompt, selfId, request.private))
                         }
                         def?.input == "none" -> {
-                            val cases = evalCases()
+                            val cases = if ("model" in r.itemKinds) modelItems() else evalCases()
                             if (cases.isEmpty()) throw IllegalArgumentException("recipe ${r.id}: no items on this phone")
                             runStages(jobId, RecipeJobs.itemJobs(jobId, r, cases, selfId, request.private))
                         }

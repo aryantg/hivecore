@@ -148,6 +148,7 @@ class SwarmGraph(
         val peerCatalogs: () -> List<Catalog> = { emptyList() },
         val recipeDefs: () -> List<RecipeDef> = { emptyList() },
         val evalCases: () -> List<JsonElement> = { emptyList() },
+        val modelItems: () -> List<JsonElement> = { emptyList() },
         val backend: () -> String = { llm.backend.value?.name?.lowercase() ?: "" },
         val clock: () -> Long = System::currentTimeMillis,
         /** "today" for the planner's date phrases (tests pin it; the phone uses [clock]) */
@@ -209,6 +210,7 @@ class SwarmGraph(
             node.recipeDefs = { id -> d.recipeDefs().firstOrNull { it.id == id } }
             node.recipes = { id, v -> d.recipeDefs().firstOrNull { it.id == id && (v.isEmpty() || it.version == v) }?.toRecipe() }
             node.evalCases = d.evalCases
+            node.modelItems = d.modelItems
             node.privateTables = d.privateTables
             node.privateDocs = {
                 val ids = d.privateDocs()
