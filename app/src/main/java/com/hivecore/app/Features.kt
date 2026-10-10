@@ -3,6 +3,12 @@ package com.hivecore.app
 import androidx.compose.runtime.Composable
 import com.hivecore.BuildConfig
 import com.hivecore.ui.Screen
+import com.hivecore.ui.screens.AskRoute
+import com.hivecore.ui.screens.DataRoute
+import com.hivecore.ui.screens.JobsRoute
+import com.hivecore.ui.screens.ModelsRoute
+import com.hivecore.ui.screens.SettingsRoute
+import com.hivecore.ui.screens.SwarmRoute
 
 /**
  * Spec section 19: every phase lands behind a flag that defaults off until its phone gate passed. The flags are
@@ -23,6 +29,29 @@ object Features {
         "remote".takeIf { remote }, "state".takeIf { state }, "cloud".takeIf { cloud }, "hardening".takeIf { hardening },
     )
 
-    /** Real screens per flag; a screen without its phase shows the placeholder. */
-    fun screens(): Map<Screen, @Composable () -> Unit> = emptyMap()
+    /**
+     * Which screens are real for a set of flags (spec section 17 per phase): split → Jobs, mesh → Swarm, runtime →
+     * Models, graph → Ask and Data; Settings is always real (its cloud section needs the cloud flag). Pure, for tests.
+     */
+    fun screensFor(flags: Collection<String>): Set<Screen> = buildSet {
+        add(Screen.SETTINGS)
+        if ("split" in flags) add(Screen.JOBS)
+        if ("mesh" in flags) add(Screen.SWARM)
+        if ("runtime" in flags) add(Screen.MODELS)
+        if ("graph" in flags) { add(Screen.ASK); add(Screen.DATA) }
+    }
+
+    /** Real screens per flag over [graph]'s view models; a screen without its phase keeps the placeholder. */
+    fun screens(graph: HiveCoreGraph): Map<Screen, @Composable () -> Unit> {
+        val on = screensFor(enabled())
+        val all: Map<Screen, @Composable () -> Unit> = mapOf(
+            Screen.ASK to { AskRoute(graph.ask) },
+            Screen.JOBS to { JobsRoute(graph.jobs) },
+            Screen.SWARM to { SwarmRoute(graph.swarm) },
+            Screen.MODELS to { ModelsRoute(graph.models) },
+            Screen.DATA to { DataRoute(graph.data) },
+            Screen.SETTINGS to { SettingsRoute(graph.settings, cloud = cloud) },
+        )
+        return all.filterKeys { it in on }
+    }
 }
