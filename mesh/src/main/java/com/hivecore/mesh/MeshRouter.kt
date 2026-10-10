@@ -133,7 +133,7 @@ class MeshRouter(
     private var pairingMode = false
     private var pairingTimer: Job? = null
     private val connectedEndpoints = LinkedHashMap<String, PeerEndpoint>()      // endpoint key -> endpoint
-    private val endpointOfNode = HashMap<String, PeerEndpoint>()                 // nodeId -> most recent endpoint
+    private val endpointsOfNode = HashMap<String, LinkedHashMap<String, PeerEndpoint>>()   // nodeId -> transport name -> its endpoint
     private val greeted = HashSet<String>()                                      // endpoint keys we sent HELLO to
     private val lastHello = HashMap<String, HelloBody>()                         // nodeId -> last verified HELLO
     private val pendingPairing = HashMap<String, PendingHello>()                 // endpoint key -> unpinned HELLO
@@ -315,7 +315,7 @@ class MeshRouter(
         peerStore.forget(nodeId)
         synchronized(lock) {
             lastHello.remove(nodeId)
-            endpointOfNode.remove(nodeId)
+            endpointsOfNode.remove(nodeId)
         }
         runningTransports().forEach { it.close(nodeId, "forgotten"); it.refresh() }
         SLog.d(TAG, "forgot ${nodeId.take(8)}")
@@ -368,14 +368,20 @@ class MeshRouter(
     fun lastHello(nodeId: String): HelloBody? = synchronized(lock) { lastHello[nodeId] }
 
     private fun connectedNodes(): List<Pair<String, PeerEndpoint>> = synchronized(lock) {
-        endpointOfNode.entries
-            .filter { key(it.value) in connectedEndpoints && peerStore.isPinned(it.key) }
-            .map { it.key to it.value }
+        endpointsOfNode.keys.filter { peerStore.isPinned(it) }.mapNotNull { id -> bestEndpointLocked(id)?.let { id to it } }
     }
 
-    private fun endpointFor(nodeId: String): PeerEndpoint? = synchronized(lock) {
-        endpointOfNode[nodeId]?.takeIf { key(it) in connectedEndpoints }
-    }
+    private fun endpointFor(nodeId: String): PeerEndpoint? = synchronized(lock) { bestEndpointLocked(nodeId) }
+
+    /** Caller holds [lock]: the connected endpoint of [nodeId] on the best-ranked transport (spec 5.1 ladder: LAN before the relay). */
+    private fun bestEndpointLocked(nodeId: String): PeerEndpoint? =
+        endpointsOfNode[nodeId]?.values?.filter { key(it) in connectedEndpoints }?.minByOrNull { rankLocked(it) }
+
+    /** Caller holds [lock]: the ladder rank of the transport an endpoint belongs to (unknown transports rank last). */
+    private fun rankLocked(ep: PeerEndpoint): Int = (running[ep.transport] ?: active?.takeIf { it.name == ep.transport })?.kind?.ordinal ?: Int.MAX_VALUE
+
+    /** Caller holds [lock]: records that [nodeId] was seen on [ep]'s transport. */
+    private fun noteEndpointLocked(nodeId: String, ep: PeerEndpoint) { endpointsOfNode.getOrPut(nodeId) { LinkedHashMap() }[ep.transport] = ep }
 
     private suspend fun sendHello(ep: PeerEndpoint) {
         val t = transportFor(ep) ?: return
@@ -459,7 +465,7 @@ class MeshRouter(
         }
         if (!checkBody(type, env, peer)) return
 
-        synchronized(lock) { endpointOfNode[env.from] = inb.endpoint }
+        synchronized(lock) { noteEndpointLocked(env.from, inb.endpoint) }
         peerStore.touch(env.from, now(), inb.endpoint.transport, inb.endpoint.endpointId)
         verifiedFlow.emit(Verified(type, env.from, env.body))
     }
@@ -731,14 +737,14 @@ class MeshRouter(
 
     private fun remember(nodeId: String, hello: HelloBody, ep: PeerEndpoint) = synchronized(lock) {
         lastHello[nodeId] = hello
-        endpointOfNode[nodeId] = ep
+        noteEndpointLocked(nodeId, ep)
     }
 
     private fun refreshPeers() {
         val pinned = peerStore.all()
         val list = synchronized(lock) {
             val out = pinned.map { p ->
-                val ep = endpointOfNode[p.nodeId]?.takeIf { key(it) in connectedEndpoints }
+                val ep = bestEndpointLocked(p.nodeId)
                 Peer(p.nodeId, p.name, pinned = true, connected = ep != null, transport = ep?.transport, holds = p.holds)
             }
             val unpinned = pendingPairing.values.filter { pv -> out.none { it.nodeId == pv.hello.nodeId } }.map { pv ->
