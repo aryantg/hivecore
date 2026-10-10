@@ -1,0 +1,33 @@
+{
+  "version": "2026-10-10",
+  "about": "Spec 15.5. Slugs are OpenRouter model ids; verify each against GET /api/v1/models before enabling the cloud. Prices are USD per million tokens (input / output) as listed by the pricing aggregators on 2026-10-10 and only feed the pre-flight spend estimate (converted at ModelsConfig.INR_PER_USD); the ledger records the cost OpenRouter reports and which slug answered, so swapping a model is an edit of this file. Caps are INR per job and per calendar month, per role.",
+  "roles": {
+    "PLANNER": {
+      "models": ["openai/gpt-5.6-luna", "google/gemini-3.5-flash-lite", "anthropic/claude-haiku-4.5"],
+      "maxTokens": 1500,
+      "jobCapInr": 5,
+      "monthCapInr": 100
+    },
+    "ESCALATE_TEXT": {
+      "models": ["anthropic/claude-sonnet-5", "openai/gpt-5.4"],
+      "maxTokens": 1500,
+      "jobCapInr": 25,
+      "monthCapInr": 500
+    },
+    "ESCALATE_MULTIMODAL": {
+      "models": ["google/gemini-3.1-pro", "google/gemini-3.8-flash"],
+      "maxTokens": 1500,
+      "jobCapInr": 40,
+      "monthCapInr": 500
+    }
+  },
+  "prices": {
+    "openai/gpt-5.6-luna": {"in": 0.20, "out": 1.20},
+    "google/gemini-3.5-flash-lite": {"in": 0.30, "out": 2.50},
+    "anthropic/claude-haiku-4.5": {"in": 1.00, "out": 5.00},
+    "anthropic/claude-sonnet-5": {"in": 2.00, "out": 10.00},
+    "openai/gpt-5.4": {"in": 2.50, "out": 15.00},
+    "google/gemini-3.1-pro": {"in": 2.00, "out": 12.00},
+    "google/gemini-3.8-flash": {"in": 0.75, "out": 3.75}
+  }
+}
