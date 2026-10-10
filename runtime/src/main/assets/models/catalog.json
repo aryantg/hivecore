@@ -1,0 +1,21 @@
+{
+  "version": "catalog-1",
+  "note": "Spec 4.3. One entry per (model, capability); a capability's builds are tried qairt first, then llama_cpp (spec 8.3). sha256: the registry rule (ModelHash) for manifest models, ModelHash.llmBundle for the GenieX LLM folder, the file digest for the GGUF; 'unpinned' marks a built-in runtime (ML Kit, Kotlin) with no file to hash. loadMsP50 and unitMsP50 are the spec 20.2 planning figures until BENCH on the iQOO 15 replaces them in Profile.p50. A newer file at files/models/catalog.json overrides this asset.",
+  "models": [
+    {"modelId": "qwen3-4b-npu", "capability": "llm.text", "runtime": "qairt", "sha256": "49777377c3de9027f39110d8e4607d7b92ebf03a7a2050e699040f009d59f5de", "sizeBytes": 3194863646, "loadMsP50": 6000, "unitMsP50": 4000, "maxContext": 4096, "big": true},
+    {"modelId": "qwen3-4b-npu", "capability": "llm.json", "runtime": "qairt", "sha256": "49777377c3de9027f39110d8e4607d7b92ebf03a7a2050e699040f009d59f5de", "sizeBytes": 3194863646, "loadMsP50": 6000, "unitMsP50": 4000, "maxContext": 4096, "big": true},
+    {"modelId": "qwen2.5-coder-1.5b-instruct-q4_0", "capability": "llm.text", "runtime": "llama_cpp", "sha256": "aa8353e0d0fca3a0041828701e90db7635197400f040676d11d7798665fa316e", "sizeBytes": 1066227264, "loadMsP50": 3000, "unitMsP50": 6000, "maxContext": 2048, "big": true},
+    {"modelId": "qwen2.5-coder-1.5b-instruct-q4_0", "capability": "llm.json", "runtime": "llama_cpp", "sha256": "aa8353e0d0fca3a0041828701e90db7635197400f040676d11d7798665fa316e", "sizeBytes": 1066227264, "loadMsP50": 3000, "unitMsP50": 6000, "maxContext": 2048, "big": true},
+    {"modelId": "qwen3vl", "capability": "vlm", "runtime": "qairt", "sha256": "d84954f0928a68e77f56872ba102573b2c1c54ed1e6ed66f1d7c6203bb37090b", "sizeBytes": 4362076160, "loadMsP50": 8000, "unitMsP50": 1500, "maxContext": 4096, "big": true},
+    {"modelId": "whisper_tiny", "capability": "asr", "runtime": "ort_qnn", "sha256": "81f4361dc0f9a0d0fc972857b0d29a5c36bb41f5ae647fb5f880e226be417a12", "sizeBytes": 118489088, "loadMsP50": 1500, "unitMsP50": 100, "maxContext": 448, "big": false},
+    {"modelId": "mlkit_text_latin", "capability": "ocr", "runtime": "mlkit", "sha256": "unpinned", "sizeBytes": 0, "loadMsP50": 300, "unitMsP50": 250, "maxContext": 0, "big": false},
+    {"modelId": "minilm_w8a8", "capability": "embed", "runtime": "litert_qnn", "sha256": "70499a0ab512dbf259304183247171ebbead118b0799ce59e4238f6280c96496", "sizeBytes": 24117248, "loadMsP50": 400, "unitMsP50": 15, "maxContext": 256, "big": false},
+    {"modelId": "yolox_w8a8", "capability": "detect", "runtime": "litert_qnn", "sha256": "de23026bb5f52c8e5a710a14fc001866f63655157ef5768deb945d3b0ac048da", "sizeBytes": 9437184, "loadMsP50": 300, "unitMsP50": 40, "maxContext": 0, "big": false},
+    {"modelId": "deeplabv3_w8a8", "capability": "segment", "runtime": "litert_qnn", "sha256": "eac144e501ccd6b5f84aabef03f065a5ebf88561baee354c2d95c836ad8e34d3", "sizeBytes": 7340032, "loadMsP50": 300, "unitMsP50": 60, "maxContext": 0, "big": false},
+    {"modelId": "mobilenet_v3_w8a8", "capability": "classify", "runtime": "litert_qnn", "sha256": "13fdf3bc3ddf0438d5076435c0a9e06736d3e53a4580c90c7bf093f0a4cf4870", "sizeBytes": 6291456, "loadMsP50": 250, "unitMsP50": 20, "maxContext": 0, "big": false},
+    {"modelId": "iqa_kotlin", "capability": "iqa", "runtime": "kotlin", "sha256": "unpinned", "sizeBytes": 0, "loadMsP50": 1, "unitMsP50": 30, "maxContext": 0, "big": false},
+    {"modelId": "sd15", "capability": "gen.image", "runtime": "ort_qnn", "sha256": "362e373e616dd49ac7693ac2faf11355dcc5b42caf261f06efd5b33079731235", "sizeBytes": 1107296256, "loadMsP50": 7000, "unitMsP50": 9000, "maxContext": 77, "big": true},
+    {"modelId": "real_esrgan_w8a8", "capability": "superres", "runtime": "litert_qnn", "sha256": "1388799e279e0af27be40ad197b36a5fb110c80a33286380df6dfeba876c4161", "sizeBytes": 2097152, "loadMsP50": 1200, "unitMsP50": 50, "maxContext": 0, "big": false},
+    {"modelId": "real_esrgan_w8a8", "capability": "upscale", "runtime": "litert_qnn", "sha256": "1388799e279e0af27be40ad197b36a5fb110c80a33286380df6dfeba876c4161", "sizeBytes": 2097152, "loadMsP50": 1200, "unitMsP50": 3000, "maxContext": 0, "big": false}
+  ]
+}
