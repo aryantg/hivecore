@@ -281,7 +281,7 @@ class SplitCommander(
                         val cls = b.errorClass ?: SplitConstants.classify(err)
                         journal.attempt(attemptRow(c, n, ev.node, if (cls == SplitConstants.ERR_YIELDED) "yield" else "error", cls = cls))
                         when (cls) {
-                            SplitConstants.ERR_YIELDED -> q.onFault(ev.node, i, n, SplitConstants.ERR_YIELDED, cls)
+                            SplitConstants.ERR_YIELDED -> { q.onFault(ev.node, i, n, SplitConstants.ERR_YIELDED, cls); q.pause(ev.node, SplitConstants.YIELD_BACKOFF_MS) }
                             in SplitConstants.COOLDOWN_CLASSES -> {
                                 q.onFault(ev.node, i, n, "$cls: $err", cls)
                                 cooldown(ev.node, cap ?: job.op.name)
@@ -338,6 +338,7 @@ class SplitCommander(
                     is Event.Yield -> WorkQueue.parseTaskId(ev.taskId)?.let { (i, n) ->
                         q.chunkAt(i)?.let { journal.attempt(attemptRow(it, n, ev.node, "yield", cls = SplitConstants.ERR_YIELDED)) }
                         q.onFault(ev.node, i, n, SplitConstants.ERR_YIELDED, SplitConstants.ERR_YIELDED)
+                        q.pause(ev.node, SplitConstants.YIELD_BACKOFF_MS)        // P7: it rejoins when idle, not in a tight loop
                     }
                     is Event.ModelReady -> { q.addNode(ev.node); q.notes += "${ev.node.take(8)} is ready for ${cap ?: job.op.name}" }
                     is Event.ModelFail -> {

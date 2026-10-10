@@ -291,7 +291,11 @@ class WorkQueue(
     /** The next chunk [node] may take, by locality, privacy, link class and the transfer rule; null = none. */
     private fun pick(node: String): Int? {
         if (isPaused(node)) return null
-        val allowed = queue.filter { canTake(it, node) }
+        // A chunk that already failed on this phone goes to a phone it has not failed on first (section 14 "requeue
+        // elsewhere"); once every candidate has failed it, any of them may retry, up to maxAttempts.
+        val allowed = queue.filter { i ->
+            canTake(i, node) && (node !in failedOn[i].orEmpty() || active.none { o -> o != node && o !in failedOn[i].orEmpty() && canTake(i, o) })
+        }
         if (allowed.isEmpty()) return null
         if (node == plan.owner) allowed.firstOrNull { chunks[it].private || chunks[it].blobs.isNotEmpty() }?.let { return it }
         for (i in allowed) {
@@ -446,9 +450,11 @@ class WorkQueue(
     fun onFault(node: String, index: Int, attempt: Int, why: String, errorClass: String? = null): Boolean {
         val a = take(node, index, attempt) ?: return false
         ranOn[index]?.remove(node)
-        // A yield (P7) or a message that could not be sent is no fault of the phone: no exclusion, no re-cut count.
+        // A yield (P7) or a message that could not be sent is no fault of the phone: no re-cut count. A timeout or a
+        // hash mismatch excludes the phone for that chunk (section 14); an ordinary error may retry anywhere.
         val blameless = errorClass == SplitConstants.ERR_YIELDED || why == SplitConstants.ERR_YIELDED || errorClass == UNREACHABLE
-        if (!blameless) { excluded.getOrPut(index) { HashSet() } += node; failedOn.getOrPut(index) { HashSet() } += node }
+        if (!blameless) failedOn.getOrPut(index) { HashSet() } += node
+        if (errorClass == TIMEOUT || errorClass == MISMATCH) excluded.getOrPut(index) { HashSet() } += node
         requeue(a, why, countFailure = !blameless)
         reconcile()
         publish()
@@ -457,7 +463,7 @@ class WorkQueue(
 
     /** Section 11.4: a missed deadline; true when the phone has now missed [SplitConstants.MISSES_TO_DROP] and should be dropped. */
     fun onMiss(node: String, index: Int, attempt: Int): Boolean {
-        onFault(node, index, attempt, "no reply", "timeout")
+        onFault(node, index, attempt, "no reply", TIMEOUT)
         val n = (misses[node] ?: 0) + 1
         misses[node] = n
         return n >= SplitConstants.MISSES_TO_DROP
@@ -465,7 +471,7 @@ class WorkQueue(
 
     /** Section 12.1: a recomputed output hash that does not match; the phone is removed at three in one job. */
     fun onHashMismatch(node: String, index: Int, attempt: Int): Boolean {
-        if (!onFault(node, index, attempt, "output hash does not match", "mismatch")) return false
+        if (!onFault(node, index, attempt, "output hash does not match", MISMATCH)) return false
         val n = (hashMismatches[node] ?: 0) + 1
         hashMismatches[node] = n
         if (n >= SplitConstants.MAX_HASH_MISMATCHES) { removeNode(node, "three output hash mismatches"); return true }
@@ -604,6 +610,9 @@ class WorkQueue(
         val RECUT_KINDS = setOf(MergeKind.CONCAT, MergeKind.STITCH, MergeKind.MONOID, MergeKind.TOPK)
         /** Fault class of a TASK that could not be sent: blameless for the phone, unlike a result error. */
         const val UNREACHABLE = "unreachable"
+        /** Fault classes of the queue's own checks (beside the section 14 result classes). */
+        const val TIMEOUT = "timeout"
+        const val MISMATCH = "mismatch"
 
         fun taskId(index: Int, attempt: Int): String = "c$index.a$attempt"
 

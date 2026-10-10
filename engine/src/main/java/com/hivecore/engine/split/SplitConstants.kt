@@ -15,6 +15,8 @@ object SplitConstants {
     const val RECUT_AFTER_PHONES = 2
     /** Capability cooldown after MODEL_FAIL or a TASK_RESULT of class oom / model_load / thermal (section 14). */
     const val CAPABILITY_COOLDOWN_MS = 10 * 60_000L
+    /** A phone that yielded is offered nothing until the next heartbeat could show it idle again (section 11.3). */
+    const val YIELD_BACKOFF_MS = 15_000L
     /** WAN node wake grace before removal (section 14 "Node asleep"). */
     const val WAN_WAKE_GRACE_MS = 20_000L
     /** Relay outage: WAN attempts wait this long before they fault (section 14 "Relay down"). */
