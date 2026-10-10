@@ -10,6 +10,10 @@ import com.hivecore.core.Profile
 import com.hivecore.core.SLog
 import com.hivecore.core.WorkerPolicy
 import com.hivecore.core.KeyValuePrefs
+import com.hivecore.core.CapabilityState
+import com.hivecore.engine.placement.CooldownTable
+import com.hivecore.runtime.catalog.ModelCatalog
+import com.hivecore.runtime.models.CapabilityPool
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -27,6 +31,10 @@ import kotlinx.coroutines.launch
  * The opt-in lives in SharedPreferences "hivecore" under [PREF_WORKER_OPT_IN] (default off).
  * NPU generation time seen on [LlmEngine.lastStats] is charged to [dutyCycle]; heavy executors can add their own
  * NPU spans with [DutyCycle.begin]/[DutyCycle.end] or [DutyCycle.record].
+ *
+ * Spec 4.6 decoration: with a [catalog] the profile carries `capabilities[]` (the catalog entries installed here,
+ * warm-flagged from the pool), `cooldowns[]` from [cooldowns] (this phone's own failed loads), `p50` from [bench]
+ * (the BENCH table), and `big` / `warm` from the [CapabilityPool] (`llm` | `vlm` | `gen` | `none`).
  */
 class WorkerPolicyImpl(
     private val nodeId: String,
@@ -45,6 +53,14 @@ class WorkerPolicyImpl(
     private val onTick: () -> Unit = {},
     private val clock: () -> Long = System::currentTimeMillis,
     private val tickMs: Long = TICK_MS,
+    /** The capability catalog (spec 4.3); null = no `capabilities[]` in the profile. */
+    private val catalog: () -> ModelCatalog? = { null },
+    /** This phone's own capability cooldowns (ModelReqHandler marks them). */
+    private val cooldowns: CooldownTable? = null,
+    /** modelId → BENCH p50 ms (BenchTable.p50). */
+    private val bench: () -> Map<String, Double> = { emptyMap() },
+    /** Model ids installed outside the registry (the GenieX LLM builds); the registry's ids are added. */
+    private val extraInstalled: () -> Set<String> = { emptySet() },
 ) : WorkerPolicy {
 
     private val optInState = MutableStateFlow(prefs.getBoolean(PREF_WORKER_OPT_IN, false))
@@ -125,10 +141,22 @@ class WorkerPolicyImpl(
             heavyOk = heavyOk(s, dutyCycle),
             queueDepth = queueDepth.value,
             big = pool?.big?.value ?: if (backend != null) "llm" else "none",
-            warm = pool?.warm?.value ?: emptyList(),
+            warm = (pool as? CapabilityPool)?.warm()?.sorted() ?: pool?.warm?.value ?: emptyList(),
             models = registry?.let { r -> runCatching { r.installed().map { "${it.id}@${it.sha256}" }.sorted() }.getOrDefault(emptyList()) }
                 ?: emptyList(),
+            p50 = runCatching(bench).getOrDefault(emptyMap()),
+            capabilities = capabilityStates(),
+            cooldowns = cooldowns?.of(nodeId) ?: emptyList(),
         )
+    }
+
+    /** Spec 4.6 `capabilities[]`: catalog entries installed here, warm-flagged from the pool's residency. */
+    private fun capabilityStates(): List<CapabilityState> {
+        val cat = runCatching(catalog).getOrNull() ?: return emptyList()
+        val installed = (registry?.let { r -> runCatching { r.installed().map { it.id } }.getOrDefault(emptyList()) } ?: emptyList()).toSet() +
+            runCatching(extraInstalled).getOrDefault(emptySet())
+        val cp = pool as? CapabilityPool
+        return cat.capabilitiesOf(installed, cp?.warm() ?: pool?.warm?.value?.toSet().orEmpty(), cp?.bigModel)
     }
 
     @Synchronized
