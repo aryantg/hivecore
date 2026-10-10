@@ -359,7 +359,12 @@ interface ModelPool {
 // v2 plan §5.3 / §13.3: the capability catalog (assets/models/catalog.json). The plan names a capability; placement
 // resolves it to a model id; replicas compare only outputs from the same sha256.
 
-/** One catalog entry. `runtime` is "qairt" (AI Hub bundle, NPU) or "llama_cpp" (GGUF Q4_0); `big` = takes the one big slot. */
+/**
+ * One catalog entry. `runtime` is "qairt" (AI Hub bundle, NPU) or "llama_cpp" (GGUF Q4_0); `big` = takes the one big slot.
+ * `url` is where the build can be fetched (http(s); null = not downloadable from the app) and `downloadSha256` the hex
+ * sha256 of the file at `url` when it differs from `sha256` (e.g. a zip archive of a bundle whose `sha256` is the
+ * installed-folder rule). Both are optional so older catalogs still parse.
+ */
 @Serializable data class ModelEntry(
     val modelId: String,
     val capability: String,
@@ -370,4 +375,6 @@ interface ModelPool {
     val unitMsP50: Int,
     val maxContext: Int,
     val big: Boolean,
+    val url: String? = null,
+    val downloadSha256: String? = null,
 )

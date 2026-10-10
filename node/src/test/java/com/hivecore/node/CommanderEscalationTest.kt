@@ -160,4 +160,53 @@ class CommanderEscalationTest {
         assertTrue(a.plan!!.lines.toString(), a.plan!!.lines[0].contains("cloud:fake/model"))
         assertFalse(a.plan!!.lines[1].contains("cloud"))                                     // the judge itself ran locally
     }
+
+    // ---- spec 9.1: the CLOUD option sends the chosen steps to the cloud first, from the orchestrator only
+
+    @Test fun cloudOptionRunsTheChosenStepInTheCloudBeforeAnyPhoneIsAsked() = runTest {
+        val h = mesh()
+        val (hr, sales, accounts) = h.hrSalesAccounts()
+        sales.escalator.delegate = ran()
+        h.start()
+        val a = h.ask(sales, q, extractDag(), cloudSteps = setOf("x")).answer
+        assertEquals(0, listOf(hr, sales, accounts).sumOf { it.extract.runs })             // no phone ran the step
+        val req = sales.escalator.requests.single()
+        assertEquals(EscalationTrigger.UserChoice, req.trigger)
+        assertEquals(0, req.localAttempts)
+        assertEquals("public", req.privacy)
+        assertTrue(a.text, a.text.contains("c1"))
+        assertTrue(a.plan!!.lines.single().contains("cloud:fake/model"))
+        assertTrue(a.notes.toString(), a.notes.any { it.contains("CLOUD option") })
+        val task = sales.ledger.entries().first { it.kind == "task" }
+        assertEquals("cloud:fake/model", MeshJson.json.parseToJsonElement(task.entry).jsonObject["source"]!!.jsonPrimitive.content)
+    }
+
+    @Test fun cloudOptionFallsBackToThePhonesWhenTheGateRefuses() = runTest {
+        val h = mesh()
+        val (hr, sales, accounts) = h.hrSalesAccounts()
+        val same = JsonArray(listOf(JsonPrimitive("s1")))
+        listOf(hr, sales, accounts).forEach { it.extract.output = same }
+        h.start()                                                                           // the delegate stays Escalator.Off
+        val a = h.ask(sales, q, extractDag(), cloudSteps = setOf("x")).answer
+        assertEquals(EscalationTrigger.UserChoice, sales.escalator.requests.single().trigger)
+        assertTrue(listOf(hr, sales, accounts).sumOf { it.extract.runs } >= 1)             // ran on the phones instead
+        assertTrue(a.text, a.text.contains("s1"))
+        assertFalse(a.plan!!.lines.single().contains("cloud"))
+        assertTrue(a.notes.toString(), a.notes.any { it.contains("instead of the cloud") && it.contains("cloud escalation is off") })
+    }
+
+    @Test fun cloudOptionNeverSendsAPrivateStep() = runTest {
+        val h = mesh()
+        val (hr, sales, accounts) = h.hrSalesAccounts()
+        val same = JsonArray(listOf(JsonPrimitive("s1")))
+        listOf(hr, sales, accounts).forEach { it.extract.output = same }
+        sales.escalator.delegate = ran()
+        h.start()
+        val dag = Dag("private", "p1", listOf(
+            TaskSpec("x", Op.EXTRACT, buildJsonObject { put("q", "key points"); put("privacy", "private"); put("replicas", 1) }, owner = sales.nodeId),
+        ), output = "x")
+        val a = h.ask(sales, q, dag, cloudSteps = setOf("x")).answer
+        assertTrue(sales.escalator.requests.toString(), sales.escalator.requests.isEmpty())
+        assertTrue(a.text, a.text.contains("s1"))
+    }
 }

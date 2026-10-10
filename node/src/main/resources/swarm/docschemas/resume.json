@@ -1,0 +1,10 @@
+{
+  "class": "resume",
+  "version": "1",
+  "description": "a CV describing a person's education, skills and work history",
+  "fields": [
+    {"name": "name", "type": "string"},
+    {"name": "skills", "type": "string_list"},
+    {"name": "years_experience", "type": "number"}
+  ]
+}

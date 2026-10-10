@@ -1,0 +1,11 @@
+{
+  "class": "purchase_order",
+  "version": "1",
+  "description": "an order sent to a supplier before delivery",
+  "fields": [
+    {"name": "po_no", "type": "string"},
+    {"name": "vendor", "type": "string"},
+    {"name": "date", "type": "date"},
+    {"name": "total", "type": "number"}
+  ]
+}

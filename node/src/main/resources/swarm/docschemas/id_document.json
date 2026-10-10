@@ -1,0 +1,11 @@
+{
+  "class": "id_document",
+  "version": "1",
+  "description": "an identity card such as Aadhaar, PAN, passport, driving licence or voter ID",
+  "identifiers": "redact_only",
+  "never_extract": ["id_number"],
+  "fields": [
+    {"name": "kind", "type": "enum", "values": ["aadhaar", "pan", "passport", "driving_licence", "voter_id", "other"]},
+    {"name": "name", "type": "string"}
+  ]
+}

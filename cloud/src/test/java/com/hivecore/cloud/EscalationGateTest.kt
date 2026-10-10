@@ -147,6 +147,21 @@ class EscalationGateTest {
         assertEquals(2, asked.size)   // declined once, allowed once; the third call asked nobody
     }
 
+    @Test fun theCloudOptionIsTheConsentForItsPlanAndStillPassesEveryOtherCheck() = runTest {
+        decision = ConsentDecision.KEEP_LOCAL                       // the sheet would refuse if it were shown
+        server.enqueue(CloudTestSupport.completion("""{"vendor":"ACME Ltd","total":12.5}"""))
+        val out = gate().tryEscalate(request(trigger = EscalationTrigger.UserChoice)) as GateOutcome.Ran
+        assertEquals("cloud:anthropic/claude-sonnet-5", out.source)
+        assertTrue(asked.isEmpty())
+        assertTrue(consentStore.allowed("job1", "2026-10"))
+        assertEquals("user_choice", ledger.tasks.single().trigger)
+        // private lineage and the trigger switch are still refused before anything leaves
+        assertTrue(gate().tryEscalate(request(privacy = Lineage.PRIVATE, trigger = EscalationTrigger.UserChoice)) is GateOutcome.Refused)
+        val off = gate(triggers = TriggerSettings(userChoice = false)).tryEscalate(request(trigger = EscalationTrigger.UserChoice)) as GateOutcome.Refused
+        assertTrue(off.reason, off.reason.contains("user choice"))
+        assertEquals(1, server.requestCount)
+    }
+
     @Test fun serverErrorRetriesThenFallsBackToTheNextModel() = runTest {
         server.enqueue(MockResponse().setResponseCode(500))
         server.enqueue(MockResponse().setResponseCode(500))

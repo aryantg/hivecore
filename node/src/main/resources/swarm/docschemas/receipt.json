@@ -1,0 +1,10 @@
+{
+  "class": "receipt",
+  "version": "1",
+  "description": "a shop or payment receipt for something already paid",
+  "fields": [
+    {"name": "merchant", "type": "string"},
+    {"name": "date", "type": "date"},
+    {"name": "total", "type": "number"}
+  ]
+}

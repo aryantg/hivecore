@@ -176,6 +176,8 @@ class SwarmGraph(
         val ensureAwake: suspend (String) -> Boolean = { true },
         /** wraps the task runner the node runs on (the memoizing runner of spec 13.2) */
         val wrapRunner: (TaskRunnerImpl) -> TaskRunner = { it },
+        /** the deputy a split run streams its journal to (spec 13.4); null = none */
+        val deputy: () -> String? = { null },
     )
 
     /** What executor factories get: the chooser and the node's own pieces. */
@@ -202,7 +204,7 @@ class SwarmGraph(
                 decorateProfile = { p -> p.copy(dataVersion = d.dataVersion(), p50 = p.p50 + d.p50()) },
                 journal = d.journal, memo = d.memo, escalator = d.escalator, readyFor = d.readyFor, unitMsOf = d.unitMsOf,
                 allowMobileData = d.allowMobileData, onCooldown = d.onCooldown, linkOf = d.linkOf, journalPull = d.journalPull,
-                ensureAwake = d.ensureAwake,
+                ensureAwake = d.ensureAwake, deputy = d.deputy,
             )
             node.recipeDefs = { id -> d.recipeDefs().firstOrNull { it.id == id } }
             node.recipes = { id, v -> d.recipeDefs().firstOrNull { it.id == id && (v.isEmpty() || it.version == v) }?.toRecipe() }
@@ -280,6 +282,8 @@ object SwarmExecutors {
             VisionExecutor(s.pool, s.tensorRuntime, s.codec, File(s.outDir, "vision"), s.registry) else null
         vision?.let { out += it }
         s.vlmAsk?.let { out += VlmAskExecutor(it) }
+        // OCR, LAYOUT, DOC_CLASSIFY, METADATA, REDACT, FIELDS over the OCR seam (ML Kit on a phone)
+        s.ocr?.let { out += com.hivecore.node.docai.DocAiExecutor(it, env.llm, env.chooser) }
         out += TextExecutor(env.llm, env.chooser, s.pool, s.tensorRuntime, s.registry)
         if (s.pool != null && s.ortRuntime != null && s.registry != null)
             out += MediaExecutor.create(s.pool, s.ortRuntime, s.registry, s.audioDecoder, s.frames, File(s.outDir, "media"))

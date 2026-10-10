@@ -37,6 +37,7 @@ import com.hivecore.node.data.DataStore
 import com.hivecore.node.docs.DocStore
 import com.hivecore.planner.CapabilitySummary
 import com.hivecore.planner.CloudPrices
+import com.hivecore.planner.ExecutionChoice
 import com.hivecore.planner.ExecutionMode
 import com.hivecore.planner.ExecutionOptions
 import com.hivecore.planner.TieredPlan
@@ -208,6 +209,8 @@ class ModelsPortImpl(
     private val nameOf: (String) -> String,
     private val prefs: KeyValuePrefs,
     private val scope: CoroutineScope,
+    /** fetches a catalog build from its `url` into the models folder (spec 17 "Download"); null = no downloads */
+    private val downloader: com.hivecore.runtime.models.ModelDownloader? = null,
 ) : ModelsPort {
     private val catalogState = MutableStateFlow(catalogOf().entries)
     override val catalog: StateFlow<List<ModelEntry>> = catalogState
@@ -240,8 +243,13 @@ class ModelsPortImpl(
 
     private fun entry(modelId: String): ModelEntry = catalogOf().entriesOf(modelId).firstOrNull() ?: throw IllegalArgumentException("$modelId is not in the catalog")
 
-    override suspend fun download(modelId: String): Result<Unit> =
-        Result.failure(UnsupportedOperationException("model downloads are not part of this build: copy the bundle into the models folder"))
+    override suspend fun download(modelId: String): Result<Unit> = runCatching {
+        val d = downloader ?: throw UnsupportedOperationException("model downloads are off in this build: copy the bundle into the models folder")
+        val e = entry(modelId)
+        if (e.url == null) throw IllegalStateException("$modelId has no download source in the catalog: copy the bundle into the models folder, or install a catalog with a url")
+        d.fetch(e).getOrThrow()
+        refresh()
+    }
 
     override suspend fun load(modelId: String): Result<Unit> = runCatching { pool.ensure(entry(modelId)).getOrThrow(); refresh() }
 
@@ -394,7 +402,7 @@ class AskPortImpl(
     private val escalator: Escalator,
     private val nameOf: (String) -> String,
 ) : AskPort {
-    private class Held(val plan: TieredPlan, val catalogs: List<Catalog>, val recipe: RecipeDef?)
+    private class Held(val plan: TieredPlan, val catalogs: List<Catalog>, val recipe: RecipeDef?, val choice: ExecutionChoice? = null)
 
     private val held = object : LinkedHashMap<String, Held>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Held>?): Boolean = size > 32
@@ -422,7 +430,7 @@ class AskPortImpl(
         if (!compiled.ok) return PlanOptions.Refused(Refusal(compiled.check.errors.joinToString("; "), compiled.planHash))
         val choice = ExecutionOptions.compute(compiled, profiles(), catalogEntries(), prices(), policy().toPlanner(), online(), selfId)
         val planId = UUID.randomUUID().toString()
-        synchronized(held) { held[planId] = Held(tp, cats, null) }
+        synchronized(held) { held[planId] = Held(tp, cats, null, choice) }
         val lineage = Lineage.lineages(compiled.dag.tasks)
         val steps = compiled.dag.tasks.map { t ->
             val sv = choice.steps.firstOrNull { it.id == t.id }
@@ -441,7 +449,7 @@ class AskPortImpl(
         }
         val cloud = choice.cloud.cloud?.takeIf { choice.cloud.enabled }?.let { c ->
             ModeEstimate(RunMode.CLOUD, c.ms, c.costInr, "${c.bytesOut / 1024} KB of prompt text for ${c.steps.size} step${if (c.steps.size == 1) "" else "s"}",
-                (choice.cloud.local?.phones?.size ?: 0).coerceAtLeast(1), "steps ${c.steps.joinToString()} run locally first; the gate re-runs a failed step in the cloud")
+                (choice.cloud.local?.phones?.size ?: 0).coerceAtLeast(1), "steps ${c.steps.joinToString()} run in the cloud from this phone; the rest stay on the phones")
         }
         return PlanOptions.Ready(
             AskPlan(planId, compiled.planHash, q, steps, pq.confidence, tp.tier.name), local, cloud,
@@ -458,7 +466,9 @@ class AskPortImpl(
         val h = synchronized(held) { held[plan.planId] } ?: run { emit(AskEvent.Refused(Refusal("that plan expired; plan again", plan.planHash))); return@flow }
         h.recipe?.let { r -> runRecipe(plan, r); return@flow }
         val pq = h.plan.plan ?: run { emit(AskEvent.Refused(Refusal("that plan has no steps", plan.planHash))); return@flow }
-        node.askComposite(plan.request, h.plan.route, h.catalogs, pq).collect { p ->
+        // spec 9.1: the CLOUD option sends the eligible LLM / VLM steps to the cloud from this phone; everything else stays local
+        val cloudSteps = if (mode == RunMode.CLOUD) h.choice?.steps?.filter { it.cloudEligible }?.map { it.id }?.toSet().orEmpty() else emptySet()
+        node.askComposite(plan.request, h.plan.route, h.catalogs, pq, cloudSteps).collect { p ->
             when (p) {
                 is AskProgress.Status -> emit(AskEvent.Status(p.text))
                 is AskProgress.Heard -> Unit

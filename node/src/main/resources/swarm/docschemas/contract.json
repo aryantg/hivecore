@@ -1,0 +1,11 @@
+{
+  "class": "contract",
+  "version": "1",
+  "description": "an agreement between parties with terms",
+  "fields": [
+    {"name": "parties", "type": "string_list"},
+    {"name": "effective_date", "type": "date"},
+    {"name": "term_months", "type": "integer", "min": 1, "max": 600},
+    {"name": "value", "type": "number"}
+  ]
+}

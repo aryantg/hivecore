@@ -1,0 +1,9 @@
+{
+  "class": "report",
+  "version": "1",
+  "description": "a report with findings, summaries or results",
+  "fields": [
+    {"name": "title", "type": "string"},
+    {"name": "date", "type": "date"}
+  ]
+}

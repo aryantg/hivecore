@@ -69,6 +69,12 @@ class HiveCoreGraph(
         /** the cloud consent sheet's state (cloud flag), for the activity to host */
         val consent: CloudConsent? = null,
         val loadRecipes: () -> List<RecipeDef> = { emptyList() },
+        /** the owner's plan consent gate (mesh flag): the approval activity and the in-app banner read its pending list */
+        val approval: com.hivecore.trust.ApprovalStore? = null,
+        /** the biometric approval key (mesh flag) the approval activity signs with */
+        val approvalKeys: com.hivecore.trust.ApprovalKeys? = null,
+        /** re-announces this phone's HELLO (a re-created approval key travels in it) */
+        val rebroadcastHello: (suspend () -> Unit)? = null,
     )
 
     val selfId: String get() = ports.selfId

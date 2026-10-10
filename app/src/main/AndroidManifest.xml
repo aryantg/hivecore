@@ -74,5 +74,15 @@
                 <data android:scheme="swarm" android:host="join" />
             </intent-filter>
         </activity>
+
+        <!-- Plan consent (spec 7.6, 17): one screen and one fingerprint for the whole plan, over the lock screen -->
+        <activity
+            android:name=".app.approval.ApprovalActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.HiveCore" />
     </application>
 </manifest>

@@ -45,13 +45,22 @@ import com.hivecore.engine.device.PresenceMonitor
 import com.hivecore.engine.device.WorkerModeController
 import com.hivecore.engine.device.WorkerPolicyImpl
 import com.hivecore.engine.device.WorkerService
+import com.hivecore.app.approval.ApprovalNotifier
+import com.hivecore.core.Decision
 import com.hivecore.engine.journal.ChunkMemo
+import com.hivecore.engine.journal.DeputySelector
 import com.hivecore.engine.journal.DeputyStore
 import com.hivecore.engine.journal.JobJournal
 import com.hivecore.engine.journal.JournalPull
 import com.hivecore.engine.journal.MemoizingTaskRunner
+import com.hivecore.engine.journal.ReplicatedJournal
 import com.hivecore.engine.journal.SqliteChunkMemo
 import com.hivecore.engine.journal.SqliteJobJournal
+import com.hivecore.engine.journal.StreamingJournal
+import com.hivecore.node.gen.ImageGenerator
+import com.hivecore.node.gen.SdPipeline
+import com.hivecore.runtime.models.ModelDownloader
+import java.util.concurrent.atomic.AtomicReference
 import com.hivecore.engine.placement.CooldownTable
 import com.hivecore.engine.placement.ModelReqHandler
 import com.hivecore.engine.placement.PlacementCoordinator
@@ -286,8 +295,11 @@ object AppWiring {
             transports[DataChannelTransport.NAME] = w
             alwaysOn += DataChannelTransport.NAME
         }
+        // plan consent (spec 7.6, 17): the biometric key is created once a fingerprint is enrolled; the notifier wakes the owner
         val approvalKeys = if (Features.meshTrust) ApprovalKeys(app) else null
-        val approval = ApprovalStore(approvalKeys, signer, null, debugAutoApprove = { BuildConfig.DEBUG && prefs.getBoolean("debug_auto_approve", false) }, clock = clock)
+        val approvalNotifier = if (Features.meshTrust) runCatching { ApprovalNotifier(app) }.getOrElse { warn("approval notifier: ${it.message}"); null } else null
+        if (approvalKeys != null) scope.launch(Dispatchers.IO) { if (approvalKeys.ensure() == null) warn("plan approvals need a fingerprint enrolled on this phone") }
+        val approval = ApprovalStore(approvalKeys, signer, approvalNotifier, debugAutoApprove = { BuildConfig.DEBUG && prefs.getBoolean("debug_auto_approve", false) }, clock = clock)
         val initial = prefs.getString(PREF_TRANSPORT, null)?.takeIf { it in transports } ?: transports.keys.first()
         val localHello = {
             val s = runCatching { store.schema() }.getOrNull()
@@ -360,7 +372,22 @@ object AppWiring {
         var consent: CloudConsent? = null
         val stateDb = if (Features.split) AndroidSqlDb.open(File(app.filesDir, "journal.db")) else null
         val memo: ChunkMemo = stateDb?.let { SqliteChunkMemo(it, clock) } ?: ChunkMemo.None
-        val journal: JobJournal = stateDb?.let { SqliteJobJournal(it) } ?: JobJournal.None
+        // spec 13.4 (state flag): the orchestrator streams every journal commit to a deputy (highest uptime, LAN
+        // preferred; uptime = how long this phone has seen it) and the job row names it so a resume pulls from it first.
+        val beaconRef = AtomicReference<ProfileBeacon?>(null)
+        val firstSeen = ConcurrentHashMap<String, Long>()
+        val deputyOf: () -> String? = {
+            val ps = beaconRef.get()?.snapshot().orEmpty()
+            val now = clock()
+            ps.forEach { firstSeen.putIfAbsent(it.nodeId, now) }
+            DeputySelector.pick(ps, ps.associate { it.nodeId to (now - (firstSeen[it.nodeId] ?: now)) }, selfId)
+        }
+        val baseJournal: ReplicatedJournal? = stateDb?.let { SqliteJobJournal(it) }
+        val journal: JobJournal = when {
+            baseJournal == null -> JobJournal.None
+            Features.state -> StreamingJournal(baseJournal, selfId, deputyOf, { to, t, b -> port.send(to, t, b) }, scope)
+            else -> baseJournal
+        }
         val compiler = PlanCompilerImpl(ops = { registeredOps.value }, capabilities = { catalog.capabilities + runtimeCaps(router, selfId) }, selfId = selfId)
         if (Features.cloud) {
             runCatching {
@@ -385,6 +412,8 @@ object AppWiring {
         val patterns = runCatching { Patterns.fromJson(app.assets.open(Patterns.ASSET_PATH).bufferedReader().readText()) }
             .getOrElse { warn("patterns: ${it.message}"); null }
         val chooser = ClosedChooserImpl(llm)
+        // OCR (spec 4.3 `ocr`, catalog `mlkit_text_latin`): ML Kit's bundled Latin recogniser, the document executors' seam
+        val ocr: com.hivecore.core.Ocr? = if (Features.runtime) runCatching { com.hivecore.node.docai.MlKitOcr(app) }.getOrElse { warn("ocr: ${it.message}"); null } else null
         lateinit var graph: SwarmGraph
         val policyFactory: (TaskRunnerImpl) -> WorkerPolicy = { runner ->
             val d = device; val pm = presence
@@ -401,9 +430,24 @@ object AppWiring {
             router = port, selfName = selfName(), scope = scope, db = db, schema = store, intentPlanner = intentPlanner, approval = approval,
             llm = llm, patterns = patterns ?: Patterns.fromJson("""{"version":"none","patterns":[]}"""), policy = policyFactory,
             executors = { env ->
+                val p = pool as? ModelPoolImpl
+                // VLM_ASK (spec 4.3 `vlm`): the catalog's preferred VLM build through the pool, a closed choice voted k times
+                val vlmAsk: (suspend (String, String, List<String>) -> Decision<String>)? = p?.let { pl -> { image, question, options ->
+                    val entry = catalog.preferred("vlm") ?: throw IllegalStateException("no vlm build in the catalog")
+                    SwarmExecutors.vlmVote(question, options) { order ->
+                        pl.with(entry.modelId) { s ->
+                            val rt = pl.runtimeFor(s.manifest) ?: throw IllegalStateException("no runtime loads ${s.manifest.id}")
+                            rt.run(s, mapOf("image" to image, "question" to question, "options" to order)).getOrThrow()["choice"]?.toString()?.takeIf { it.isNotEmpty() }
+                        }.getOrThrow()
+                    }
+                } }
+                // GEN_IMAGE (spec 4.3 `gen.image`): the SD 1.5 bundle on the ORT QNN runtime
+                val sd = if (p != null && ort != null) SdPipeline(p, ort!!, SdPipeline.bpeFrom(registry)) else null
                 val seams = SwarmExecutors.Seams(pool = pool, registry = registry, tensorRuntime = litert, ortRuntime = ort,
-                    codec = ImageIo(), outDir = File(app.filesDir, "out"), audioDecoder = AndroidAudioDecoder(), frames = AndroidFrameSource(),
-                    bench = (pool as? ModelPoolImpl)?.let { p -> Bench(registry, p, p::runtimeFor, batteryTempC = { device?.batteryTempC?.value }) })
+                    codec = ImageIo(), outDir = File(app.filesDir, "out"), vlmAsk = vlmAsk, ocr = ocr,
+                    audioDecoder = AndroidAudioDecoder(), frames = AndroidFrameSource(),
+                    imageGenerator = sd?.let { pipe -> ImageGenerator { params -> pipe.generate(params) } },
+                    bench = p?.let { pl -> Bench(registry, pl, pl::runtimeFor, batteryTempC = { device?.batteryTempC?.value }) })
                 SwarmExecutors.build(env, seams) + LlmMapExecutor(llm)
             },
             chooser = chooser, ledger = ledger, docIndex = index, docAnswerer = LlmDocAnswerer(llm),
@@ -417,12 +461,14 @@ object AppWiring {
             unitMsOf = { node, cap -> catalog.preferred(cap)?.let { e -> graph.node.beacon?.profileOf(node)?.p50?.get(e.modelId) ?: e.unitMsP50.toDouble() } },
             allowMobileData = { prefs.getBoolean(SettingsKeys.MOBILE_DATA_BLOBS, false) },
             onCooldown = { n, c, u -> cooldowns.mark(n, c, u) }, linkOf = linkOf,
-            journalPull = if (stateDb != null) JournalPull(port, journal as SqliteJobJournal).also { it.start(scope) } else null,
+            journalPull = if (stateDb != null) JournalPull(port, journal as ReplicatedJournal).also { it.start(scope) } else null,
+            deputy = if (Features.state) deputyOf else { { null } },
             ensureAwake = { id -> relayPresence?.let { p -> if (router.endpointOf(id)?.transport == RelayTransport.NAME) p.ensureAwake(id) else true } ?: true },
             wrapRunner = { r -> if (memo !== ChunkMemo.None) MemoizingTaskRunner(r, memo) else r },
         )
         graph = SwarmGraph.build(deps)
         val node = graph.node
+        beaconRef.set(node.beacon)
         registeredOps.value = graph.executors.flatMap { it.ops }.toSet()
         if (authoriser != null) {
             node.onPlanSeen = authoriser::onPlanSeen
@@ -433,7 +479,7 @@ object AppWiring {
         node.onModelReply = { t, from, body -> coordinators.values.forEach { pc -> scope.launch { pc.onMessage(t, from, body) } } }
         if (Features.runtime && Features.split) node.placeFor = { job, planId -> placeJob(job, planId, selfId, catalog, cooldowns, node, journal, coordinators, scope) }
         node.onSignal = { body, _ -> webrtc?.let { w -> scope.launch { w.handleSignal(body) } } }
-        relay?.onPresence { id, online, _ -> if (!online) node.beacon?.forget(id) }
+        relay?.onPresence { id, online, _ -> if (!online) { node.beacon?.forget(id); firstSeen.remove(id) } }
         if (stateDb != null) {
             val deputy = DeputyStore(stateDb, port, memo, clock).also { it.start(scope) }
             node.reclaim?.extra = deputy::holding
@@ -487,7 +533,8 @@ object AppWiring {
             groupId, scope, warnings, onInviteOpened = { inv -> relay?.let { r -> RelayPairingChannel.host(r, inv.token).onFailure { warn("relay invite: ${it.message}") } } }, clock)
             .also { swarmPortRef = it } else FakeSwarmPort.sample()
         val modelsPort = if (Features.runtime && capBench != null && pool is CapabilityPool)
-            ModelsPortImpl(selfId, selfName(), { catalog }, pool, registry, capBench, benchTable, profiles, nameOf, prefs, scope) else FakeModelsPort.sample()
+            ModelsPortImpl(selfId, selfName(), { catalog }, pool, registry, capBench, benchTable, profiles, nameOf, prefs, scope,
+                downloader = ModelDownloader(ModelRegistryImpl.defaultRoots(app)) { (registry as? ModelRegistryImpl)?.refresh() }) else FakeModelsPort.sample()
         val tiered = if (Features.graph && patterns != null) TieredPlannerImpl(selfId, SwarmRouterImpl(), PlannerImpl(chooser, patterns, clock), compiler, t2,
             t2First = { prefs.getBoolean(PREF_T2_FIRST, false) }, clock = clock, patterns = patterns) else null
         val askPort = if (tiered != null) AskPortImpl(selfId, selfName(), tiered, node, node, { graph.catalogs() },
@@ -498,7 +545,8 @@ object AppWiring {
         val jobRunner: JobRunner = if (Features.split) node else com.hivecore.core.fakes.FakeJobRunner()
         SLog.d(TAG, "wired in ${System.currentTimeMillis() - t0} ms: node ${selfId.take(8)} (${selfName()}), transports ${transports.keys} (always-on $alwaysOn), features ${Features.enabled()}")
         return HiveCoreGraph.Ports(selfId, askPort, jobRunner, swarmPort, graph.policy, modelsPort, registry, pool, store, store,
-            if (Features.graph) dataPort else FakeDataPort(), settingsPort, consent, loadRecipes = recipes)
+            if (Features.graph) dataPort else FakeDataPort(), settingsPort, consent, loadRecipes = recipes,
+            approval = approval.takeIf { Features.meshTrust }, approvalKeys = approvalKeys, rebroadcastHello = { router.rebroadcastHello() })
     }
 
     private const val GUEST = "relay-guest"

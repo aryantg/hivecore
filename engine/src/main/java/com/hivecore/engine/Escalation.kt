@@ -19,11 +19,14 @@ import kotlinx.serialization.json.JsonObject
     @Serializable data class LowConfidence(val confidence: Double) : EscalationTrigger()
     @Serializable data object UserVerdict : EscalationTrigger()
     @Serializable data class TimeBudget(val estimateMs: Long, val budgetMs: Long) : EscalationTrigger()
+    /** Spec 9.1: the user picked the CLOUD option in the plan panel, so the eligible steps go to the cloud first (not a 15.1 trigger: nothing failed). */
+    @Serializable data object UserChoice : EscalationTrigger()
 
     /** The short name written to the journal's `escalations.trigger` and the ledger. */
     val name: String get() = when (this) {
         is CapabilityGap -> "capability_gap"; is VerificationFailed -> "verification_failed"
         is LowConfidence -> "low_confidence"; is UserVerdict -> "user_verdict"; is TimeBudget -> "time_budget"
+        is UserChoice -> "user_choice"
     }
 }
 

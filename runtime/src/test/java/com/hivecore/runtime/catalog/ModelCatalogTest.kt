@@ -49,6 +49,31 @@ class ModelCatalogTest {
         assertTrue(ModelCatalog.validate(listOf(llmQ, llmG, det)).isEmpty())
     }
 
+    @Test fun validateChecksTheOptionalDownloadFields() {
+        val hex = "ab".repeat(32)
+        assertTrue(ModelCatalog.validate(listOf(det.copy(url = "https://models.example.com/yolo.zip", downloadSha256 = hex))).isEmpty())
+        assertTrue(ModelCatalog.validate(listOf(det.copy(url = "http://10.0.0.2:8080/yolo.tflite"))).isEmpty())
+        val problems = ModelCatalog.validate(listOf(
+            det.copy(url = "ftp://models.example.com/yolo.zip"), e("m2", "detect", sha = hex).copy(url = "not a url"),
+            e("m3", "detect").copy(url = "https://"), e("m4", "detect").copy(downloadSha256 = "abc"),
+            e("m5", "detect").copy(downloadSha256 = "zz".repeat(32)),
+        ))
+        assertEquals(problems.toString(), 3, problems.count { "url must be http(s)" in it })
+        assertEquals(problems.toString(), 2, problems.count { "downloadSha256 must be 64 hex digits" in it })
+        assertTrue(ModelCatalog.isHttpUrl("https://example.com/a?b=c")); assertFalse(ModelCatalog.isHttpUrl("file:///tmp/x"))
+    }
+
+    @Test fun parseReadsTheDownloadFieldsAndDefaultsThemToNull() {
+        val hex = "cd".repeat(32)
+        val one = """{"modelId":"yolo","capability":"detect","runtime":"litert_qnn","sha256":"unpinned","sizeBytes":1,"loadMsP50":1,"unitMsP50":1,"maxContext":0,"big":false"""
+        val plain = ModelCatalog.parse("[$one}]").entries.single()
+        assertNull(plain.url); assertNull(plain.downloadSha256)
+        val withUrl = ModelCatalog.parse("""[$one,"url":"https://models.example.com/yolo.zip","downloadSha256":"$hex"}]""").entries.single()
+        assertEquals("https://models.example.com/yolo.zip", withUrl.url); assertEquals(hex, withUrl.downloadSha256)
+        assertTrue(ModelCatalog.tryParse("""[$one,"url":"gopher://x"}]""").isFailure)
+        assertTrue(ModelCatalog.tryParse("""[$one,"downloadSha256":"short"}]""").isFailure)
+    }
+
     @Test fun parseTakesBothShapesAndRefusesInvalidText() {
         val one = """{"modelId":"yolo","capability":"detect","runtime":"litert_qnn","sha256":"unpinned","sizeBytes":1,"loadMsP50":1,"unitMsP50":1,"maxContext":0,"big":false}"""
         assertEquals("catalog-7", ModelCatalog.parse("""{"version":"catalog-7","models":[$one]}""").version)

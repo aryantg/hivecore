@@ -1,0 +1,10 @@
+{
+  "class": "letter",
+  "version": "1",
+  "description": "a letter or memo addressed to someone",
+  "fields": [
+    {"name": "sender", "type": "string"},
+    {"name": "date", "type": "date"},
+    {"name": "subject", "type": "string"}
+  ]
+}

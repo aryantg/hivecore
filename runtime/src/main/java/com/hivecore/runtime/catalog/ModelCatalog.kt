@@ -108,10 +108,17 @@ class ModelCatalog(entries: List<ModelEntry>, val version: String = "") {
 
         fun isHex64(s: String): Boolean = s.length == 64 && s.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }
 
+        /** An absolute `http://` or `https://` URL with a host (what [ModelEntry.url] may hold). */
+        fun isHttpUrl(s: String): Boolean = runCatching {
+            val u = java.net.URI(s)
+            (u.scheme == "http" || u.scheme == "https") && !u.host.isNullOrBlank()
+        }.getOrDefault(false)
+
         /**
          * The problems with [entries] (empty = valid): blank ids, an unknown runtime, a sha256 that is neither 64 hex
          * digits nor [UNPINNED], negative sizes, non-positive load or unit times, a duplicate (model, capability), a
-         * `big` build for a capability with no big-slot kind, and a model listed under two runtimes.
+         * `big` build for a capability with no big-slot kind, a model listed under two runtimes, a `url` that is not
+         * http(s), and a `downloadSha256` that is not 64 hex digits.
          */
         fun validate(entries: List<ModelEntry>): List<String> {
             val problems = ArrayList<String>()
@@ -128,6 +135,8 @@ class ModelCatalog(entries: List<ModelEntry>, val version: String = "") {
                 if (e.unitMsP50 <= 0) problems += "$at: unitMsP50 must be positive"
                 if (e.maxContext < 0) problems += "$at: negative maxContext"
                 if (e.big && BigKind.of(e.capability) == BigKind.NONE) problems += "$at: big build for a capability with no big-slot kind"
+                e.url?.let { if (!isHttpUrl(it)) problems += "$at: url must be http(s)" }
+                e.downloadSha256?.let { if (!isHex64(it)) problems += "$at: downloadSha256 must be 64 hex digits" }
                 if (!seen.add(e.modelId to e.capability)) problems += "$at: duplicate (modelId, capability)"
                 val prev = runtimeOf.put(e.modelId, e.runtime)
                 if (prev != null && prev != e.runtime) problems += "$at: model listed under runtimes '$prev' and '${e.runtime}'"

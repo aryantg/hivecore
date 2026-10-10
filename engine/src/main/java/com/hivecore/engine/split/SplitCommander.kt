@@ -94,6 +94,8 @@ class SplitCommander(
      * phone did not come back within the wake grace, so the attempt is faulted blamelessly and the phone paused.
      */
     private val ensureAwake: suspend (nodeId: String) -> Boolean = { true },
+    /** section 13.4: the deputy this run streams its journal to (recorded in the job row so a resume knows whom to ask); null = none */
+    private val deputy: () -> String? = { null },
 ) {
     private sealed interface Event {
         data class Result(val node: String, val body: TaskResultBody) : Event
@@ -174,7 +176,9 @@ class SplitCommander(
         }
         val planHash = Canon.sha256Hex(Canon.canonical(Canon.json.encodeToJsonElement(com.hivecore.core.Dag.serializer(), plan.dag)) +
             ChunkPlanner.PATTERNS_VERSION + (job.modelSha256 ?: modelHash()))
+        val deputyId = try { deputy() } catch (e: Exception) { null }
         fun jobRow(state: String) = JobRow(job.jobId, planId, planHash, "split", state, t0, clock(), privacy,
+            capsSnapshot = deputyId?.let { d -> kotlinx.serialization.json.buildJsonObject { put("deputy", kotlinx.serialization.json.JsonPrimitive(d)) } },
             spec = Canon.json.encodeToJsonElement(SplitJob.serializer(), job))
         fun chunkRow(c: Chunk, state: String, attempts: Int) = ChunkRow(job.jobId, c.chunkId, c.index, c.params, if (c.private) plan.owner else null,
             state, attempts, c.recutOf?.let { q.chunkAt(it)?.chunkId }, c.units)

@@ -142,7 +142,8 @@ class Commander(
      * Runs one composite question end to end; the last emission is [AskProgress.Done]. [planned] is a plan the tiered
      * planner (spec 7.2) already produced for [question]; null plans it here with the T1 [planner].
      */
-    fun askComposite(question: String, route: RouteDecision, catalogs: List<Catalog>, planned: PlannedQuestion? = null): Flow<AskProgress> = channelFlow {
+    fun askComposite(question: String, route: RouteDecision, catalogs: List<Catalog>, planned: PlannedQuestion? = null,
+                     cloudSteps: Set<String> = emptySet()): Flow<AskProgress> = channelFlow {
         val t0 = clock()
         fun timing() = Timing(totalMs = clock() - t0)
         send(AskProgress.Status("Planning…"))
@@ -169,7 +170,7 @@ class Commander(
         val events = Channel<Event>(Channel.UNLIMITED)
         synchronized(lock) { runs[planId] = events }
         try {
-            val run = PlanRun(planId, check.planHash, question, dag, assignment, snapshot, mh, planned.confidence, events) { send(it) }
+            val run = PlanRun(planId, check.planHash, question, dag, assignment, snapshot, mh, planned.confidence, events, cloudSteps) { send(it) }
             val outcome = run.execute(t0)
             send(AskProgress.Done(outcome))
         } finally {
@@ -214,6 +215,8 @@ class Commander(
         val modelHash: String,
         val confidence: Double,
         val events: Channel<Event>,
+        /** spec 9.1 CLOUD option: step ids the user chose to run in the cloud from this phone (eligible ones only) */
+        val cloudSteps: Set<String>,
         val progress: suspend (AskProgress) -> Unit,
     ) {
         val tasks = LinkedHashMap<String, TaskRun>().also { m -> dag.tasks.forEach { m[it.id] = TaskRun(it) } }
@@ -274,7 +277,11 @@ class Commander(
                     if (!isJudge(t.spec) && t.spec.inputs.any { judgePending(it) }) continue
                     t.dispatched = true
                     progressed = true
-                    if (t.cls == OpClass.REDUCE) reduce(t) else dispatchFirst(t)
+                    when {
+                        t.cls == OpClass.REDUCE -> reduce(t)
+                        t.spec.id in cloudSteps && cloudFirst(t) -> Unit
+                        else -> dispatchFirst(t)
+                    }
                 }
             }
         }
@@ -297,6 +304,31 @@ class Commander(
         /** A judge of [taskId] exists in the plan and has not finished. */
         private fun judgePending(taskId: String): Boolean =
             tasks.values.any { isJudge(it.spec) && it.spec.inputs.firstOrNull() == taskId && !it.done }
+
+        /**
+         * Spec 9.1: a step the CLOUD option covers runs on this phone through the gate before any phone is asked. The
+         * gate's pre-flight still applies (lineage, caps, the orchestrator role). True when the cloud answered; a
+         * refusal or a cloud failure leaves a note and the step runs locally (the user's answer is never lost to a
+         * cloud outage), and a private or owner step never goes near the gate.
+         */
+        private suspend fun cloudFirst(t: TaskRun): Boolean {
+            val lin = lineage[t.spec.id] ?: Lineage.PUBLIC
+            if (lin == Lineage.PRIVATE || t.cls == OpClass.OWNER || t.cls == OpClass.REDUCE) return false
+            val inputs = t.spec.inputs.associateWith { tasks[it]?.output ?: JsonNull }
+            val req = EscalationRequest(jobId = planId, planId = planId, commander = selfId, node = t.spec, inputs = inputs,
+                privacy = lin, trigger = EscalationTrigger.UserChoice, localAttempts = 0)
+            val g = try { escalator.tryEscalate(req) } catch (e: Exception) { GateOutcome.Failed(e.message ?: e.javaClass.simpleName) }
+            return when (g) {
+                is GateOutcome.Ran -> {
+                    t.output = g.output; t.executors = listOf(cloudExecutor(g.slug)); t.verified = true; t.cloud = g.slug
+                    notes += "${t.spec.op} ${t.spec.id}: ${g.slug} answered (CLOUD option)"
+                    SLog.d(TAG, "${t.spec.op} ${t.spec.id} answered by cloud:${g.slug} (user choice)")
+                    true
+                }
+                is GateOutcome.Refused -> { notes += "${t.spec.op} ${t.spec.id} ran on the phones instead of the cloud (${g.reason})"; false }
+                is GateOutcome.Failed -> { notes += "${t.spec.op} ${t.spec.id} ran on the phones; the cloud call failed (${g.reason})"; false }
+            }
+        }
 
         private suspend fun dispatchFirst(t: TaskRun) {
             val primary = assignment[t.spec.id] ?: selfId

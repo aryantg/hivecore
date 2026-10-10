@@ -200,7 +200,23 @@ class SwarmHarness(private val testScope: TestScope, private val debugRouters: B
         old.swarm.stop()
         old.scope.cancel()
         nodes.remove(old.id)
-        return Node(old.id, old.name, old.role, true, old.guardOverride, signerOverride = old.signer, stateDbOverride = old.stateDb).also { nodes[old.id] = it }
+        return Node(old.id, old.name, old.role, true, old.guardOverride, signerOverride = old.signer, stateDbOverride = old.stateDb, remote = old.remote).also { nodes[old.id] = it }
+    }
+
+    /**
+     * The boot steps of a phone that [restart]ed while the others kept running: [setup] re-registers its executors,
+     * then it pins the others (and they pin it), starts the stack and the router, and announces its PROFILE.
+     */
+    suspend fun relaunch(n: Node, setup: (Node) -> Unit = {}): Node {
+        setup(n)
+        for (o in nodes.values) if (o !== n) { n.pin(o); o.pin(n) }
+        n.swarm.start(periodicProfiles = false)
+        testScope.testScheduler.runCurrent()
+        n.router.start()
+        testScope.testScheduler.runCurrent()
+        n.swarm.beacon!!.announce()
+        testScope.testScheduler.runCurrent()
+        return n
     }
 
     fun hrSalesAccounts(eligible: Boolean = true): Triple<Node, Node, Node> =
@@ -227,10 +243,10 @@ class SwarmHarness(private val testScope: TestScope, private val debugRouters: B
         val refusal: AskOutcome.Refusal get() = outcome as AskOutcome.Refusal
     }
 
-    suspend fun ask(from: Node, question: String, dag: Dag, confidence: Double = 1.0): Asked {
+    suspend fun ask(from: Node, question: String, dag: Dag, confidence: Double = 1.0, cloudSteps: Set<String> = emptySet()): Asked {
         from.planner.result = Result.success(PlannedQuestion(dag, confidence))
         val owners = dag.tasks.mapNotNull { it.owner }.distinct()
-        val progress = from.swarm.askComposite(question, RouteDecision(true, owners, emptyList(), "test"), catalogs()).toList()
+        val progress = from.swarm.askComposite(question, RouteDecision(true, owners, emptyList(), "test"), catalogs(), cloudSteps = cloudSteps).toList()
         testScope.testScheduler.runCurrent()
         return Asked(progress.filterIsInstance<AskProgress.Done>().single().outcome, progress.filterIsInstance<AskProgress.Status>().map { it.text })
     }

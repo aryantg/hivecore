@@ -28,6 +28,8 @@ data class TriggerSettings(
     val lowConfidence: Boolean = true,
     val userVerdict: Boolean = true,
     val timeBudget: Boolean = false,
+    /** spec 9.1: the CLOUD option picked in the plan panel */
+    val userChoice: Boolean = true,
 ) {
     fun enabled(t: EscalationTrigger): Boolean = when (t) {
         is EscalationTrigger.CapabilityGap -> capabilityGap
@@ -35,6 +37,7 @@ data class TriggerSettings(
         is EscalationTrigger.LowConfidence -> lowConfidence
         is EscalationTrigger.UserVerdict -> userVerdict
         is EscalationTrigger.TimeBudget -> timeBudget
+        is EscalationTrigger.UserChoice -> userChoice
     }
 }
 
@@ -106,8 +109,10 @@ class EscalationGate(
         // (5): spend
         val estimateInr = config.estimateInr(slug, payload.tokensIn, maxTokens.toLong())
         caps.check(role, req.jobId, estimateInr)?.let { return GateOutcome.Refused(it) }
-        // (6): consent, remembered per job or per month
+        // (6): consent, remembered per job or per month. Picking the CLOUD option in the plan panel (9.1) is the consent
+        // for that plan: the panel already named the steps, the cost and what leaves, so the sheet is not shown again.
         val month = caps.month()
+        if (req.trigger is EscalationTrigger.UserChoice) consentStore.allowJob(req.jobId)
         if (!consentStore.allowed(req.jobId, month)) {
             val ask = ConsentRequest(req.jobId, step.id, slug, payload.bytes, payload.items, req.privacy, req.trigger.name, estimateInr)
             when (consent.ask(ask)) {

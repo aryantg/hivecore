@@ -279,8 +279,9 @@ class SwarmNode(
     fun stop() { collector?.cancel(); collector = null; beacon?.stop(); reclaim?.stop(); resumeCoordinator?.stop() }
 
     /** A composite question asked on this phone: this phone commands the plan ([planned]: the tiered planner's plan, else T1 plans it). */
-    fun askComposite(question: String, route: RouteDecision, catalogs: List<Catalog>, planned: com.hivecore.core.PlannedQuestion? = null): Flow<AskProgress> =
-        commander.askComposite(question, route, catalogs, planned)
+    fun askComposite(question: String, route: RouteDecision, catalogs: List<Catalog>, planned: com.hivecore.core.PlannedQuestion? = null,
+                     cloudSteps: Set<String> = emptySet()): Flow<AskProgress> =
+        commander.askComposite(question, route, catalogs, planned, cloudSteps)
 
     /**
      * Splits one op over [input] across the swarm (§4B) with this phone as commander: chunk grid updates, then a last
@@ -561,6 +562,7 @@ class SwarmNode(
             linkOf: (String) -> Link? = { null },
             journalPull: JournalPull? = null,
             ensureAwake: suspend (String) -> Boolean = { true },
+            deputy: () -> String? = { null },
         ): SwarmNode {
             val selfId = router.nodeId
             lateinit var node: SwarmNode
@@ -583,7 +585,7 @@ class SwarmNode(
             node.split = SplitCommander(selfId, comparator, profiles = { beacon.snapshot() }, transmit = { to, t, b -> node.sendTo(to, t, b) },
                 sendBlobs = { to, ids, jobId -> sendBlobsFor(node, to, ids, jobId) }, clock = clock, selector = treeSelector, modelHash = modelHash,
                 journal = journal, memo = memo, escalator = escalator, schema = schemaValidator, readyFor = readyFor, unitMsOf = unitMsOf,
-                allowMobileData = allowMobileData, onCooldown = onCooldown, ensureAwake = ensureAwake)
+                allowMobileData = allowMobileData, onCooldown = onCooldown, ensureAwake = ensureAwake, deputy = deputy)
             node.journal = journal
             if (memo !== ChunkMemo.None) node.reclaim = ReclaimResponder(router, memo)
             if (journal !== JobJournal.None) {

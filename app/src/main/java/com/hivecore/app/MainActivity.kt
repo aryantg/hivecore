@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import com.hivecore.app.approval.ApprovalBanner
 import com.hivecore.core.SLog
 import com.hivecore.ui.HiveCoreShell
 import com.hivecore.ui.ScreenRegistry
@@ -14,7 +15,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val graph = HiveCoreGraph.get(this)
         setContent {
-            HiveCoreShell(registry = ScreenRegistry(Features.screens(graph)))
+            androidx.compose.foundation.layout.Box {
+                HiveCoreShell(registry = ScreenRegistry(Features.screens(graph)))
+                // spec 17: the pending-approval card is the fallback when the notification does not surface
+                graph.ports.approval?.let { androidx.compose.foundation.layout.Column { ApprovalBanner(it, this@MainActivity) } }
+            }
             graph.consent?.let { ConsentSheetHost(it) }
         }
         handleInvite(intent, graph)
