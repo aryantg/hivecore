@@ -9,6 +9,7 @@ import com.hivecore.ui.ScreenRegistry
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { HiveCoreShell(registry = ScreenRegistry(Features.screens())) }
+        val graph = HiveCoreGraph.get(this)
+        setContent { HiveCoreShell(registry = ScreenRegistry(Features.screens(graph))) }
     }
 }
