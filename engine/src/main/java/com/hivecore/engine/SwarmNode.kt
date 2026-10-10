@@ -29,7 +29,11 @@ import com.hivecore.core.SLog
 import com.hivecore.core.Scheduler
 import com.hivecore.core.SchemaSource
 import com.hivecore.core.TaskRunner
+import com.hivecore.core.WorkerActivityLog
+import com.hivecore.core.WorkerEvent
+import com.hivecore.core.WorkerEventKind
 import com.hivecore.core.WorkerPolicy
+import com.hivecore.core.WorkerTaskContext
 import com.hivecore.core.WorkloadSpec
 import com.hivecore.mesh.BlobBody
 import com.hivecore.mesh.BlobDeletedBody
@@ -59,6 +63,7 @@ import com.hivecore.engine.split.SplitCommander
 import com.hivecore.engine.split.SplitInput
 import com.hivecore.engine.split.SplitJob
 import com.hivecore.engine.split.TreeSelector
+import com.hivecore.engine.split.WorkQueue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -169,6 +174,47 @@ class SwarmNode(
     var onRoster: ((MsgType, String, String) -> Unit)? = null
     /** SIGNAL (WebRTC offer / answer / candidate) for the blob transport (§3.3). */
     var onSignal: ((SignalBody, String) -> Unit)? = null
+
+    // ---- the worker timeline (display only) ----
+    /** Which model a task's type calls for on this phone, for the timeline. */
+    data class ModelChoice(val capability: String, val modelId: String?, val reason: String, val warm: Boolean?)
+    /** Picks the model for a task the way its executor will (the app plugs in the catalog and the pool); null = the op needs no model. */
+    var modelChoice: (com.hivecore.core.TaskSpec) -> ModelChoice? = ::defaultModelChoice
+    var clock: () -> Long = System::currentTimeMillis
+    /** This phone's worker timeline, plus the mirror of its workers' timelines for the jobs it commands; see [attachActivity]. */
+    var activity: WorkerActivityLog? = null
+        private set
+    private val planChunks = LinkedHashMap<String, Int>()   // split planId -> chunk count, from the PLAN
+    private val placing = HashSet<String>()                  // planIds of this phone's jobs in placement
+
+    /** A run of this phone's that its workers' timelines are mirrored for: in placement or live. */
+    private fun mirrored(planId: String): Boolean = synchronized(lock) { planId in placing } || split?.isLive(planId) == true
+
+    /**
+     * Records this phone's worker events in [log] and sends each one for another commander to that commander as
+     * TASK_PROGRESS; events for this phone's own jobs go straight to its mirror.
+     */
+    fun attachActivity(log: WorkerActivityLog) {
+        activity = log
+        log.onEmit { e ->
+            if (e.node != selfId || e.kind == WorkerEventKind.RECEIPT_COUNTERSIGNED) return@onEmit
+            if (e.commander == selfId) { if (mirrored(e.planId)) log.onPeer(e); return@onEmit }
+            scope.launch { router.send(e.commander, MsgType.TASK_PROGRESS, MeshJson.encode(e)).onFailure { SLog.d(TAG, "TASK_PROGRESS not sent: ${it.message}") } }
+        }
+    }
+
+    private fun event(body: TaskBody, kind: WorkerEventKind, choice: ModelChoice? = null): WorkerEvent {
+        val parsed = WorkQueue.parseTaskId(body.task.id)
+        return WorkerEvent(body.planId, kind, selfId, body.commander, clock(), taskId = body.task.id, op = body.task.op.name,
+            capability = choice?.capability, modelId = choice?.modelId, reason = choice?.reason, warm = choice?.warm,
+            chunkIndex = body.chunkIndex ?: parsed?.first, chunkCount = body.chunkCount ?: synchronized(lock) { planChunks[body.planId] },
+            label = body.label, stage = body.stage)
+    }
+
+    private fun emit(e: WorkerEvent) { activity?.emit(e) }
+
+    private fun chooseModel(task: com.hivecore.core.TaskSpec): ModelChoice? =
+        try { modelChoice(task) } catch (e: Exception) { SLog.w(TAG, "model choice: ${e.message}"); defaultModelChoice(task) }
 
     private val jobList = MutableStateFlow<List<JobProgress>>(emptyList())
     override val jobs: StateFlow<List<JobProgress>> = jobList
@@ -301,10 +347,18 @@ class SwarmNode(
         val sc = split ?: throw IllegalStateException("this node has no split commander")
         val j = enforcePrivate(job)
         val place = placeFor
-        if (ready != null || place == null) { emitAll(sc.run(j, useMemo, ready)); return@flow }
+        if (ready != null || place == null) {
+            try { emitAll(sc.run(j, useMemo, ready)) } finally { activity?.forgetJob(j.jobId) }
+            return@flow
+        }
         val run = runSeq.incrementAndGet()
-        val placed = place(j, "${j.jobId}#$run")
-        emitAll(sc.run(j, useMemo, placed, planRun = run))
+        val planId = "${j.jobId}#$run"
+        // the workers' model-boot events (TASK_PROGRESS) arrive while placement runs, before the split run is live
+        synchronized(lock) { placing += planId }
+        try {
+            val placed = place(j, planId)
+            emitAll(sc.run(j, useMemo, placed, planRun = run))
+        } finally { synchronized(lock) { placing -= planId }; activity?.forgetJob(j.jobId) }
     }
 
     /** A job over a table or document the owner marked private runs on this phone only (§7). */
@@ -370,6 +424,11 @@ class SwarmNode(
                 MsgType.PLAN -> {
                     val plan = MeshJson.decode<PlanBody>(body)
                     onPlanSeen?.invoke(plan, from)
+                    if (plan.chunkIds.isNotEmpty() && from != selfId) {
+                        val count = plan.chunkIds.size / SplitConstants.MAX_ATTEMPTS
+                        synchronized(lock) { planChunks[plan.planId] = count; while (planChunks.size > 100) planChunks.remove(planChunks.keys.first()) }
+                        emit(WorkerEvent(plan.planId, WorkerEventKind.PLAN_RECEIVED, selfId, from, clock(), op = plan.question.removePrefix("split ").uppercase(), chunkCount = count))
+                    }
                     owner?.onPlan(plan, from) { t, b -> sendTo(from, t, b) }
                 }
                 MsgType.PLAN_CONSENT_REQ, MsgType.PLAN_CONSENT_RES, MsgType.TASK_RESULT, MsgType.TASK_YIELD -> {
@@ -394,6 +453,11 @@ class SwarmNode(
                 MsgType.JOURNAL -> onJournal?.invoke(MeshJson.decode(body), from)
                 MsgType.ROSTER, MsgType.REVOKE -> onRoster?.invoke(type, from, body)
                 MsgType.SIGNAL -> onSignal?.invoke(MeshJson.decode(body), from)
+                MsgType.TASK_PROGRESS -> {
+                    val e = MeshJson.decode<WorkerEvent>(body)
+                    // display only, and only from the phone it names, for a job this phone runs now
+                    if (e.node == from && e.commander == selfId && mirrored(e.planId)) activity?.onPeer(e)
+                }
                 else -> Unit
             }
         } catch (e: Exception) {
@@ -425,34 +489,51 @@ class SwarmNode(
         }
         if (from != selfId && !acceptWork()) {
             scope.launch { sendTo(from, MsgType.TASK_YIELD, MeshJson.encode(TaskSignalBody(body.planId, body.task.id, selfId, "worker mode is off"))) }
+            emit(event(body, WorkerEventKind.YIELDED).copy(error = "worker mode is off"))
             return
         }
+        val log = activity
+        val choice = if (log != null) chooseModel(body.task) else null
+        emit(event(body, WorkerEventKind.CHUNK_RECEIVED, choice))
         val job = scope.launch {
             val files = body.task.blobs.map { id -> blobs?.file(id) }
             if (files.any { it == null }) {
                 SLog.w(TAG, "TASK ${body.task.id} from ${from.take(8)}: ${files.count { it == null }} of ${files.size} blob(s) missing")
                 reply(from, TaskResultBody(body.planId, body.task.id, selfId, error = "released items are missing on this phone", errorClass = SplitConstants.ERR_BLOBS_MISSING))
+                emit(event(body, WorkerEventKind.RESULT_FAILED, choice).copy(error = "released items are missing on this phone"))
                 return@launch
             }
             val inputs = body.task.inputs.map { body.inputs[it] ?: JsonNull }
             SLog.d(TAG, "TASK ${body.task.id} ${body.task.op} from ${from.take(8)}: ${files.size} blob(s), running")
+            if (choice != null) emit(event(body, WorkerEventKind.MODEL_SELECTED, choice))
+            emit(event(body, WorkerEventKind.CHUNK_RUNNING, choice))
             val t0 = System.nanoTime()
-            val r = runner.run(body.task, inputs, files.filterNotNull(), from)
+            // the task context lets the model pool and the memo report a cold load or a memo hit against this chunk
+            val r = if (log == null) runner.run(body.task, inputs, files.filterNotNull(), from)
+                else kotlinx.coroutines.withContext(WorkerTaskContext(log, event(body, WorkerEventKind.CHUNK_RUNNING, choice), clock)) {
+                    runner.run(body.task, inputs, files.filterNotNull(), from)
+                }
             val ms = (System.nanoTime() - t0) / 1_000_000
             SLog.d(TAG, "TASK ${body.task.id} ran in $ms ms: ${r.exceptionOrNull()?.message ?: "ok"}")
             r.fold(
                 onSuccess = { out ->
                     val hash = Canon.hash(out)
-                    reply(from, TaskResultBody(body.planId, body.task.id, selfId, out, hash, ms = ms))
+                    if (reply(from, TaskResultBody(body.planId, body.task.id, selfId, out, hash, ms = ms)))
+                        emit(event(body, WorkerEventKind.RESULT_SENT, choice).copy(ms = ms))
+                    else emit(event(body, WorkerEventKind.RESULT_FAILED, choice).copy(ms = ms, error = "the result did not reach the orchestrator"))
                     if (from != selfId) {
                         try { onWorkedForOthers(from, ms) } catch (e: Exception) { SLog.w(TAG, "contribution counter: ${e.message}") }
                         try { onTaskRan(body, from, out, hash) } catch (e: Exception) { SLog.w(TAG, "task receipt: ${e.message}") }
                     }
                 },
                 onFailure = { e ->
-                    if (e.message == TaskRunnerImpl.YIELDED)
+                    if (e.message == TaskRunnerImpl.YIELDED) {
                         sendTo(from, MsgType.TASK_YIELD, MeshJson.encode(TaskSignalBody(body.planId, body.task.id, selfId, TaskRunnerImpl.YIELDED)))
-                    else reply(from, TaskResultBody(body.planId, body.task.id, selfId, error = e.message ?: e.javaClass.simpleName, errorClass = TaskFailure.classOf(e)))
+                        emit(event(body, WorkerEventKind.YIELDED, choice))
+                    } else {
+                        reply(from, TaskResultBody(body.planId, body.task.id, selfId, error = e.message ?: e.javaClass.simpleName, errorClass = TaskFailure.classOf(e)))
+                        emit(event(body, WorkerEventKind.RESULT_FAILED, choice).copy(ms = ms, error = e.message ?: e.javaClass.simpleName))
+                    }
                 }
             )
         }
@@ -460,7 +541,8 @@ class SwarmNode(
         job.invokeOnCompletion { synchronized(lock) { if (workerJobs[key]?.second === job) workerJobs.remove(key) } }
     }
 
-    private suspend fun reply(to: String, res: TaskResultBody) {
+    /** False when the result did not leave this phone. */
+    private suspend fun reply(to: String, res: TaskResultBody): Boolean {
         var body = MeshJson.encode(res)
         val store = blobs
         val output = res.output
@@ -468,11 +550,11 @@ class SwarmNode(
             // Phone gate finding: a 30-photo OCR chunk is ~74 KB of JSON, over the 64 KB envelope; send it as a blob.
             val id = store.put(Canon.canonical(output).toByteArray(Charsets.UTF_8))
             val sent = sendBlob(to, id, res.planId)
-            if (sent.isFailure) { SLog.w(TAG, "TASK_RESULT ${res.taskId}: output blob not sent: ${sent.exceptionOrNull()?.message}"); return }
+            if (sent.isFailure) { SLog.w(TAG, "TASK_RESULT ${res.taskId}: output blob not sent: ${sent.exceptionOrNull()?.message}"); return false }
             SLog.d(TAG, "TASK_RESULT ${res.taskId}: ${body.length} B output sent as blob ${id.take(8)} (${sent.getOrNull()} chunks)")
             body = MeshJson.encode(res.copy(output = null, outputBlob = id))
         }
-        sendTo(to, MsgType.TASK_RESULT, body).onFailure { SLog.w(TAG, "TASK_RESULT ${res.taskId} not sent: ${it.message}") }
+        return sendTo(to, MsgType.TASK_RESULT, body).onFailure { SLog.w(TAG, "TASK_RESULT ${res.taskId} not sent: ${it.message}") }.isSuccess
     }
 
     /**
@@ -495,6 +577,8 @@ class SwarmNode(
         if (entry.first != from) return
         entry.second.cancel()
         SLog.d(TAG, "TASK ${b.taskId} cancelled by its commander: ${b.reason}")
+        emit(WorkerEvent(b.planId, WorkerEventKind.CANCELLED, selfId, from, clock(), taskId = b.taskId,
+            chunkIndex = WorkQueue.parseTaskId(b.taskId)?.first, error = b.reason))
     }
 
     private fun onBlob(b: BlobBody, from: String) {
@@ -547,7 +631,14 @@ class SwarmNode(
             MsgType.TASK_RESULT, MsgType.TASK_YIELD, MsgType.TASK_CANCEL, MsgType.BLOB, MsgType.BLOB_DELETED,
             // v2
             MsgType.MODEL_REQ, MsgType.MODEL_READY, MsgType.MODEL_FAIL, MsgType.RECLAIM, MsgType.RECLAIM_RES, MsgType.JOURNAL,
-            MsgType.ROSTER, MsgType.REVOKE, MsgType.SIGNAL)
+            MsgType.ROSTER, MsgType.REVOKE, MsgType.SIGNAL, MsgType.TASK_PROGRESS)
+
+        /** Without a catalog: the task's own model id ("requested"), else none named ("built-in"); null for ops with no capability. */
+        fun defaultModelChoice(task: com.hivecore.core.TaskSpec): ModelChoice? {
+            val cap = com.hivecore.core.OpRegistry[task.op].capability ?: return null
+            val id = task.modelId ?: (task.params["modelId"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+            return ModelChoice(cap, id, if (id != null) "requested" else "built-in", null)
+        }
 
         /**
          * Builds the whole swarm side of one phone over real neighbours. Call before `router.start()`, then [start].
@@ -635,6 +726,7 @@ class SwarmNode(
                 allowMobileData = allowMobileData, onCooldown = onCooldown, ensureAwake = ensureAwake, deputy = deputy,
                 decisions = decisionModel?.let { com.hivecore.engine.decide.ChunkDecisions(it, selfId, decisionBudget, clock) })
             node.journal = journal
+            node.clock = clock
             if (memo !== ChunkMemo.None) node.reclaim = ReclaimResponder(router, memo)
             if (journal !== JobJournal.None) {
                 val coordinator = ResumeCoordinator(router, memo, journal, clock)

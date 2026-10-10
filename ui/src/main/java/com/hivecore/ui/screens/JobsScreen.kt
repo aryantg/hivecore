@@ -87,6 +87,8 @@ fun JobsScreen(
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item("title") { ScreenTitle("Jobs", "Chunks across your phones, merged into one identical result") }
         item("message") { MessageBar(state.message, onDismissMessage) }
+        // on a worker: the chunks this phone is doing for another phone, step by step
+        items(state.working, key = { "working-" + it.planId }) { w -> WorkingForCard(w) }
 
         val current = state.current
         if (state.phase != Phase.IDLE) {
@@ -191,8 +193,10 @@ private fun LiveJob(state: JobsViewModel.UiState, p: JobProgress?, onSelectChunk
             }
             if (p != null && p.merge.isNotBlank()) Text("Merge: ${Recipes.mergeLabel(p.merge)} on this phone", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
-            if (p == null) LoadingRow("Starting: splitting into chunks…")
-            else {
+            if (p == null) {
+                LoadingRow(if (state.preparing.isEmpty()) "Starting: splitting into chunks…" else "Starting: the phones are booting their models…")
+                if (state.preparing.isNotEmpty()) { Spacer(Modifier.height(6.dp)); PreparingList(state.preparing) }
+            } else {
                 val frac = JobFormat.progress(p)
                 LinearProgressIndicator(progress = { frac }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Progress ${(frac * 100).toInt()} percent" })
                 Spacer(Modifier.height(4.dp))
@@ -233,6 +237,8 @@ private fun PhoneLane(l: JobsViewModel.PhoneLane, maxRate: Double, elapsedMs: Lo
         }
         Spacer(Modifier.height(3.dp))
         LinearProgressIndicator(progress = { frac }, modifier = Modifier.fillMaxWidth().height(6.dp))
+        // live from the worker (TASK_PROGRESS): the model it booted, the chunk it holds, the result it sent back
+        l.activityLine?.let { Spacer(Modifier.height(3.dp)); ActivityLine(null, it, l.busy) }
     }
 }
 

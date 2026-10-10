@@ -33,6 +33,8 @@ enum class MsgType {
     RECLAIM, RECLAIM_RES,
     /** orchestrator → deputy journal stream (§11.4) */
     JOURNAL,
+    /** worker → orchestrator: one display-only worker timeline event (core.WorkerEvent) for a chunk of its split job */
+    TASK_PROGRESS,
 }
 
 /** HELLO: sent on every connection and re-broadcast after ingest/delete. `pubkey` must hash to `nodeId`. */
@@ -210,6 +212,11 @@ object MeshJson {
     val commander: String,
     val ts: Long,
     val nonce: String,
+    /** split jobs, display only (the worker timeline): the chunk's 0-based index, the run's chunk count, its slice in words, the recipe stage */
+    val chunkIndex: Int? = null,
+    val chunkCount: Int? = null,
+    val label: String? = null,
+    val stage: String? = null,
 )
 
 /** TASK_RESULT: executor → commander. `outputHash` = sha256 of canonical(output); `error` set on failure. */

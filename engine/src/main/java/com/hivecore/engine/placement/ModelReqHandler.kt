@@ -1,6 +1,9 @@
 package com.hivecore.engine.placement
 
 import com.hivecore.core.SLog
+import com.hivecore.core.WorkerActivityLog
+import com.hivecore.core.WorkerEvent
+import com.hivecore.core.WorkerEventKind
 import com.hivecore.mesh.MeshJson
 import com.hivecore.mesh.ModelFailBody
 import com.hivecore.mesh.ModelReadyBody
@@ -32,6 +35,9 @@ class ModelReqHandler(
     private val scope: CoroutineScope,
     private val cooldowns: CooldownTable? = null,
     private val acceptWork: () -> Boolean = { true },
+    /** the worker timeline: the model chosen for the request's capability, then its load (display only) */
+    private val activity: WorkerActivityLog? = null,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     constructor(selfId: String, catalog: ModelCatalog, pool: CapabilityPool, scope: CoroutineScope, cooldowns: CooldownTable? = null,
                 acceptWork: () -> Boolean = { true }) : this(selfId, { catalog }, pool, scope, cooldowns, acceptWork)
@@ -48,23 +54,37 @@ class ModelReqHandler(
     suspend fun process(body: ModelReqBody, from: String): Pair<MsgType, String> {
         fun fail(cls: String, msg: String?, cool: Boolean = false): Pair<MsgType, String> {
             if (cool && cls in ErrorClasses.COOLDOWN) cooldowns?.mark(selfId, body.capability)
+            if (cool) emit(body, from, WorkerEventKind.MODEL_FAILED, body.modelId, error = "$cls ${msg.orEmpty()}".trim())
             SLog.w(TAG, "MODEL_REQ ${body.capability}/${body.modelId} from ${from.take(8)}: $cls ${msg.orEmpty()}")
             return MsgType.MODEL_FAIL to MeshJson.encode(ModelFailBody(body.planId, selfId, body.modelId, cls, msg))
         }
         if (body.commander != from) return fail(ErrorClasses.UNSUPPORTED, "commander is not the sender")
         if (from != selfId && !acceptWork()) return fail(ErrorClasses.UNSUPPORTED, "worker mode is off")
         val cat = catalog()
-        val entry = cat.entry(body.modelId, body.capability)
+        val named = cat.entry(body.modelId, body.capability)
+        val entry = named
             ?: cat.preferred(body.capability)
             ?: return fail(ErrorClasses.UNSUPPORTED, "capability ${body.capability} is not in this phone's catalog")
+        val warmBefore = runCatching { entry.modelId in pool.warm() }.getOrNull()
+        emit(body, from, WorkerEventKind.MODEL_SELECTED, entry.modelId, reason = if (named != null) "requested" else "preferred", warm = warmBefore)
         if (ModelCatalog.isHex64(body.sha256) && ModelCatalog.isHex64(entry.sha256) && !body.sha256.equals(entry.sha256, ignoreCase = true))
             return fail(ErrorClasses.MODEL_LOAD, "sha256 of ${entry.modelId} differs from the orchestrator's catalog")
         val deadline = body.deadlineMs.takeIf { it > 0 } ?: Long.MAX_VALUE
+        if (warmBefore != true) emit(body, from, WorkerEventKind.MODEL_LOADING, entry.modelId)
         val r = withTimeoutOrNull(deadline) { pool.ensure(entry) }
             ?: return fail(ErrorClasses.TIMEOUT, "load took longer than ${body.deadlineMs} ms")
         return r.fold(
-            { li -> MsgType.MODEL_READY to MeshJson.encode(ModelReadyBody(body.planId, selfId, li.modelId, li.loadMs, li.warm)) },
+            { li ->
+                emit(body, from, WorkerEventKind.MODEL_READY, li.modelId, warm = li.warm, loadMs = li.loadMs)
+                MsgType.MODEL_READY to MeshJson.encode(ModelReadyBody(body.planId, selfId, li.modelId, li.loadMs, li.warm))
+            },
             { e -> fail(ErrorClasses.of(e).takeIf { it in ErrorClasses.MODEL_FAIL } ?: ErrorClasses.MODEL_LOAD, e.message, cool = true) })
+    }
+
+    private fun emit(body: ModelReqBody, from: String, kind: WorkerEventKind, modelId: String, reason: String? = null, warm: Boolean? = null,
+                     loadMs: Long? = null, error: String? = null) {
+        activity?.emit(WorkerEvent(body.planId, kind, selfId, from, clock(), capability = body.capability, modelId = modelId, reason = reason,
+            warm = warm, loadMs = loadMs, error = error))
     }
 
     private companion object { const val TAG = "ModelReq" }

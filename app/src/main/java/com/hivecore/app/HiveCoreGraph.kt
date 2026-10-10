@@ -75,6 +75,8 @@ class HiveCoreGraph(
         val approvalKeys: com.hivecore.trust.ApprovalKeys? = null,
         /** re-announces this phone's HELLO (a re-created approval key travels in it) */
         val rebroadcastHello: (suspend () -> Unit)? = null,
+        /** the worker timeline (split flag): this phone's chunks for other phones, and its workers' mirrored for its own jobs */
+        val workerActivity: com.hivecore.core.WorkerActivity? = null,
     )
 
     val selfId: String get() = ports.selfId
@@ -92,7 +94,8 @@ class HiveCoreGraph(
     val consent: CloudConsent? get() = ports.consent
 
     val ask: AskViewModel by lazy { AskViewModel(askPort, prefs, scope) }
-    val jobs: JobsViewModel by lazy { JobsViewModel(jobRunner, swarmPort.peers, ports.loadRecipes, scope, resultHash = { p -> p.resultRef?.removePrefix("split:") }) }
+    val jobs: JobsViewModel by lazy { JobsViewModel(jobRunner, swarmPort.peers, ports.loadRecipes, scope, resultHash = { p -> p.resultRef?.removePrefix("split:") },
+        activity = ports.workerActivity, selfId = selfId, nameOf = { id -> swarmPort.roster.value.nameOf(id) }) }
     val swarm: SwarmViewModel by lazy { SwarmViewModel(swarmPort, workerPolicy, scope) }
     val models: ModelsViewModel by lazy { ModelsViewModel(modelsPort, modelRegistry, modelPool, selfId, scope) }
     val data: DataViewModel by lazy { DataViewModel(schema, dataAdmin, dataPort, scope) }

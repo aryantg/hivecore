@@ -153,6 +153,9 @@ class SplitCommander(
         return true
     }
 
+    /** True while the run [planId] ("<jobId>#<run>") is live on this phone (a worker's TASK_PROGRESS is shown only then). */
+    fun isLive(planId: String): Boolean = synchronized(lock) { planId in runs }
+
     /**
      * Runs [job] to completion; emits the chunk grid as it changes; the last emission has `done` (complete, or
      * `partial` with a reason) or `error` (cancelled, could not plan, merge failed). [ready] overrides [readyFor] for
@@ -287,7 +290,8 @@ class SplitCommander(
                 val now = clock()
                 journal.attempt(AttemptRow(job.jobId, c.chunkId, a.attempt, a.node, now, now + a.deadlineMs, if (a.duplicate) "duplicate" else "sent"))
                 journal.chunk(chunkRow(c, "running", a.attempt))
-                val body = MeshJson.encode(TaskBody(planId, plan.task(c, a.taskId), emptyMap(), a.deadlineMs, job.modelSha256 ?: modelHash(), selfId, now, UUID.randomUUID().toString()))
+                val body = MeshJson.encode(TaskBody(planId, plan.task(c, a.taskId), emptyMap(), a.deadlineMs, job.modelSha256 ?: modelHash(), selfId, now, UUID.randomUUID().toString(),
+                    chunkIndex = c.index, chunkCount = q.chunkCount, label = runCatching { Splitters.label(job.input, c) }.getOrNull(), stage = job.jobId.substringAfterLast('/', "").ifEmpty { null }))
                 if (remote) q.addBytes(body.length.toLong())
                 transmit(a.node, MsgType.TASK, body).onFailure {
                     SLog.w(TAG, "TASK ${a.taskId} to ${a.node.take(8)} not sent: ${it.message}")
