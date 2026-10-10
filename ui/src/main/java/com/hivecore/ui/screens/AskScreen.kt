@@ -227,7 +227,7 @@ fun PlanBody(o: PlanOptions.Ready, running: Pair<RunMode, String>?, onChoose: (R
         StepList(plan.steps.map { s ->
             StepItem(s.op, "${s.phone} · ${Format.duration(s.estimateMs)}", cloud = s.cloud, verified = s.verified, a11y = "Step ${s.op} on ${s.phone}")
         })
-        Text("plan ${Format.shortHash(plan.planHash)}", style = HiveTextStyles.monoSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (com.hivecore.ui.design.LocalShowHashes.current) Text("plan ${Format.shortHash(plan.planHash)}", style = HiveTextStyles.monoSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(HiveSpacing.sm)) {
         ModeOption(o.local, RunMode.LOCAL, o.localBlockedReason, selected = running?.first == RunMode.LOCAL, suggested = o.suggested == RunMode.LOCAL,
@@ -286,7 +286,7 @@ fun AnswerBody(item: AskViewModel.HistoryItem, a: AskAnswer, expanded: Boolean, 
             a.provenance.forEach { p -> KeyValue(p.node, p.line) }
             a.notes.forEach { n -> Text("Note: $n", style = MaterialTheme.typography.bodySmall) }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("${Format.plural(a.steps.size, "step")} · plan ${Format.shortHash(a.planHash)}", style = HiveTextStyles.monoSmall, modifier = Modifier.weight(1f))
+                Text(Format.plural(a.steps.size, "step") + if (com.hivecore.ui.design.LocalShowHashes.current) " · plan ${Format.shortHash(a.planHash)}" else "", style = HiveTextStyles.monoSmall, modifier = Modifier.weight(1f))
                 HiveButton(HiveAction(if (expanded) "Hide steps" else "Show steps", if (expanded) HiveIcons.collapse else HiveIcons.expand, onClick = onToggle), ButtonKind.Text)
             }
             if (expanded) StepList(a.steps.map { s -> StepItem(s.op, "${s.phone} · ${Format.duration(s.estimateMs)}", cloud = s.cloud, verified = s.verified) })

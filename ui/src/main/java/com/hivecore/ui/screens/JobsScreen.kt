@@ -295,7 +295,7 @@ private fun ResultHero(p: JobProgress, hash: String?, onOpenResult: () -> Unit, 
             Stat(JobFormat.bytes(p.bytesMoved), "moved"),
         ))
         p.resultSummary?.let { Spacer(Modifier.height(HiveSpacing.sm)); Text(it, style = MaterialTheme.typography.bodyLarge) }
-        Text("result hash ${Format.shortHash(hash)}", style = HiveTextStyles.monoSmall, modifier = Modifier.padding(top = HiveSpacing.xs))
+        if (com.hivecore.ui.design.LocalShowHashes.current) Text("result hash ${Format.shortHash(hash)}", style = HiveTextStyles.monoSmall, modifier = Modifier.padding(top = HiveSpacing.xs))
     }
 }
 

@@ -51,7 +51,11 @@ fun SettingsRoute(vm: SettingsViewModel, cloud: Boolean = true, demoSection: (@C
         onCapJob = vm::setCapJob, onCapMonth = vm::setCapMonth, onSchemaSharing = vm::setSchemaSharing, onMobileData = vm::setMobileDataBlobs,
         onRelay = vm::setRelayAddress, onAdvanced = vm::setAdvanced, onHeartbeatLan = vm::setHeartbeatLan, onHeartbeatWan = vm::setHeartbeatWan,
         onDeadlineFloor = vm::setDeadlineFloor, onDeadlineFactor = vm::setDeadlineFactor, onResetTuning = vm::resetTuning,
-        onExportLedger = vm::exportLedger, onForgetPeer = vm::forgetPeer, onDismissMessage = vm::dismissMessage, demoSection = demoSection)
+        onExportLedger = vm::exportLedger, onForgetPeer = vm::forgetPeer, onDismissMessage = vm::dismissMessage, demoSection = demoSection,
+        demoActions = DemoActions(setDemoMode = vm::setDemoMode, setSpeed = vm::setDemoSpeed, setRole = vm::setRole, seedAll = vm::seedAll,
+            setAutoApprove = vm::setAutoApprove, previewApproval = vm::previewApproval, previewConsent = vm::previewConsent, generatePhotos = vm::generatePhotos,
+            setKeepScreenOn = vm::setKeepScreenOn, setLargeText = vm::setLargeText, setHideHashes = vm::setHideHashes, openPermission = vm::openPermission,
+            setReset = vm::setResetOptions, reset = vm::resetDemo))
 }
 
 /** The icon of each cloud policy on the segmented control. */
@@ -92,6 +96,7 @@ fun SettingsScreen(
     onDismissMessage: () -> Unit,
     modifier: Modifier = Modifier,
     demoSection: (@Composable () -> Unit)? = null,
+    demoActions: DemoActions = DemoActions(),
 ) {
     HiveScreen(
         Screen.SETTINGS, modifier,
@@ -99,7 +104,8 @@ fun SettingsScreen(
             Stat(state.policy.short, "cloud policy", Tone.Accent, state.policy.icon())),
         message = state.message, onDismissMessage = onDismissMessage,
     ) {
-        if (demoSection != null) item("demo") { demoSection() }
+        state.demo?.let { d -> item("demo") { DemoGroup(d, demoActions) } }
+        if (demoSection != null) item("demo-extra") { demoSection() }
 
         item("policy") {
             PreferenceGroup("Cloud policy", icon = HiveIcons.cloud) {

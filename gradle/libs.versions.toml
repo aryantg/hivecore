@@ -16,6 +16,7 @@ qnnDelegate = "2.50.0"
 ortQnn = "1.29.0"
 nearby = "19.5.0"
 mlkitText = "16.0.1"
+mlkitBarcode = "17.3.0"
 biometric = "1.1.0"
 pdfbox = "2.0.27.0"
 camerax = "1.6.2"
@@ -52,6 +53,7 @@ onnxruntime-android-qnn = { group = "com.microsoft.onnxruntime", name = "onnxrun
 play-services-nearby = { group = "com.google.android.gms", name = "play-services-nearby", version.ref = "nearby" }
 # OCR
 mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitText" }
+mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcode" }
 # Biometric
 androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
 # PDF

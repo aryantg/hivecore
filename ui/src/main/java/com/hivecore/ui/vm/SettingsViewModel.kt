@@ -2,7 +2,12 @@ package com.hivecore.ui.vm
 
 import com.hivecore.core.KeyValuePrefs
 import com.hivecore.core.SLog
+import com.hivecore.core.NodeRole
 import com.hivecore.ui.ports.CloudPolicy
+import com.hivecore.ui.ports.DemoKeys
+import com.hivecore.ui.ports.DemoPort
+import com.hivecore.ui.ports.PermissionItem
+import com.hivecore.ui.ports.ResetOptions
 import com.hivecore.ui.ports.MemberView
 import com.hivecore.ui.ports.SettingsKeys
 import com.hivecore.ui.ports.SettingsPort
@@ -24,7 +29,27 @@ class SettingsViewModel(
     private val prefs: KeyValuePrefs,
     private val port: SettingsPort,
     private val scope: CoroutineScope,
+    /** the presenter's controls; null hides the Demo group */
+    private val demo: DemoPort? = null,
 ) {
+    /** Settings > Demo: everything a presenter flips before or during a demo. */
+    data class DemoState(
+        val debugBuild: Boolean,
+        val demoMode: Boolean,
+        val speedX10: Int,
+        val role: NodeRole,
+        val autoApprove: Boolean,
+        val keepScreenOn: Boolean,
+        val largeText: Boolean,
+        val hideHashes: Boolean,
+        val permissions: List<PermissionItem> = emptyList(),
+        /** "Seeding SALES…" while a demo action runs */
+        val working: String? = null,
+        val reset: ResetOptions = ResetOptions(),
+    ) {
+        val missingPermissions: Int get() = permissions.count { !it.granted }
+    }
+
     data class UiState(
         val policy: CloudPolicy = CloudPolicy.ASK,
         val hasKey: Boolean = false,
@@ -46,6 +71,7 @@ class SettingsViewModel(
         val busy: Boolean = false,
         val lastExport: String? = null,
         val message: String? = null,
+        val demo: DemoState? = null,
     ) {
         val keyLine: String get() = if (hasKey) "Key stored (ends $keyHint)" else "No key: the CLOUD option is unavailable"
         val canSaveKey: Boolean get() = keyDraft.isNotBlank()
@@ -67,10 +93,34 @@ class SettingsViewModel(
         deadlineFloorS = prefs.getInt(SettingsKeys.DEADLINE_FLOOR_S, SettingsKeys.DEFAULT_DEADLINE_FLOOR_S),
         deadlineFactor = prefs.getInt(SettingsKeys.DEADLINE_FACTOR_X10, SettingsKeys.DEFAULT_DEADLINE_FACTOR_X10) / 10.0,
         peers = runCatching { port.knownPeers() }.getOrDefault(emptyList()),
+        demo = demo?.let { d ->
+            DemoState(
+                debugBuild = d.debugBuild,
+                demoMode = prefs.getBoolean(DemoKeys.DEMO_MODE, false),
+                speedX10 = prefs.getInt(DemoKeys.DEMO_SPEED_X10, 10),
+                role = NodeRole.entries.firstOrNull { it.name == prefs.getString(DemoKeys.NODE_ROLE, null) } ?: NodeRole.SALES,
+                autoApprove = prefs.getBoolean(DemoKeys.DEBUG_AUTO_APPROVE, false),
+                keepScreenOn = prefs.getBoolean(DemoKeys.KEEP_SCREEN_ON, false),
+                largeText = prefs.getBoolean(DemoKeys.LARGE_TEXT, false),
+                hideHashes = prefs.getBoolean(DemoKeys.HIDE_HASHES, false),
+                permissions = d.permissions.value,
+            )
+        },
     )
 
+    /** Photos generated from the Demo group land here (the app adds them to the Jobs screen and opens it). */
+    var onPhotosReady: (List<String>) -> Unit = { SLog.w(TAG, "onPhotosReady not wired") }
+
+    init {
+        demo?.let { d -> scope.launch { d.permissions.collect { p -> _state.update { s -> s.copy(demo = s.demo?.copy(permissions = p)) } } } }
+    }
+
     /** Re-reads everything (peers may have changed on the Swarm screen). */
-    fun refresh() { _state.update { s -> load().copy(keyDraft = s.keyDraft, advanced = s.advanced, lastExport = s.lastExport, message = s.message) } }
+    fun refresh() {
+        demo?.refreshPermissions()
+        _state.update { s -> load().copy(keyDraft = s.keyDraft, advanced = s.advanced, lastExport = s.lastExport, message = s.message,
+            demo = load().demo?.copy(working = s.demo?.working, reset = s.demo?.reset ?: ResetOptions())) }
+    }
 
     fun setPolicy(p: CloudPolicy) { prefs.putString(SettingsKeys.CLOUD_POLICY, p.key); _state.update { it.copy(policy = p) }; SLog.d(TAG, "cloud policy=${p.key}") }
 
@@ -113,6 +163,45 @@ class SettingsViewModel(
     }
 
     fun dismissMessage() { _state.update { it.copy(message = null) } }
+
+    // ---- demo (Settings > Demo) ----
+    private fun patchDemo(f: (DemoState) -> DemoState) { _state.update { s -> s.copy(demo = s.demo?.let(f)) } }
+
+    /** Switches between the real swarm and the scripted one; the app restarts so the graph is rebuilt. */
+    fun setDemoMode(on: Boolean) {
+        prefs.putBoolean(DemoKeys.DEMO_MODE, on); patchDemo { it.copy(demoMode = on) }
+        SLog.d(TAG, "demo mode -> $on"); demo?.restart()
+    }
+    fun setDemoSpeed(x10: Int) { prefs.putInt(DemoKeys.DEMO_SPEED_X10, x10); patchDemo { it.copy(speedX10 = x10) } }
+    fun setAutoApprove(on: Boolean) { prefs.putBoolean(DemoKeys.DEBUG_AUTO_APPROVE, on); patchDemo { it.copy(autoApprove = on) } }
+    fun setKeepScreenOn(on: Boolean) { prefs.putBoolean(DemoKeys.KEEP_SCREEN_ON, on); patchDemo { it.copy(keepScreenOn = on) } }
+    fun setLargeText(on: Boolean) { prefs.putBoolean(DemoKeys.LARGE_TEXT, on); patchDemo { it.copy(largeText = on) } }
+    fun setHideHashes(on: Boolean) { prefs.putBoolean(DemoKeys.HIDE_HASHES, on); patchDemo { it.copy(hideHashes = on) } }
+    fun setResetOptions(o: ResetOptions) { patchDemo { it.copy(reset = o) } }
+
+    fun setRole(role: NodeRole) { patchDemo { it.copy(role = role) }; demoAction("Seeding ${role.name.lowercase()}…") { it.setRoleAndSeed(role) } }
+    fun seedAll() = demoAction("Seeding every role…") { it.seedAll() }
+    fun previewApproval() = demoAction("Sending a sample approval request…") { it.previewApproval() }
+    fun previewConsent() = demoAction("Opening the consent sheet…") { it.previewConsent() }
+    fun generatePhotos(n: Int) = demoAction("Drawing $n sample photos…") { d -> d.generateSamplePhotos(n).map { paths -> onPhotosReady(paths); "${paths.size} sample photos are ready on the Jobs page" } }
+    fun resetDemo() {
+        val o = _state.value.demo?.reset ?: return
+        demoAction("Resetting…") { d -> d.resetDemoState(o).onSuccess { d.restart() } }
+    }
+    fun openPermission(id: String) { demo?.openPermission(id) }
+    fun refreshPermissions() { demo?.refreshPermissions() }
+
+    private fun demoAction(working: String, block: suspend (DemoPort) -> Result<String>) {
+        val d = demo ?: return
+        if (_state.value.demo?.working != null) return
+        patchDemo { it.copy(working = working) }
+        scope.launch {
+            val r = try { block(d) } catch (e: CancellationException) { throw e } catch (e: Exception) { Result.failure(e) }
+            r.onSuccess { m -> _state.update { it.copy(message = m) } }
+                .onFailure { e -> SLog.e(TAG, "demo action failed", e); _state.update { it.copy(message = "Demo action failed: ${e.message ?: e.javaClass.simpleName}") } }
+            patchDemo { it.copy(working = null) }
+        }
+    }
 
     private fun action(what: String, block: suspend () -> Result<Unit>) {
         if (_state.value.busy) return

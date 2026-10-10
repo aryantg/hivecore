@@ -77,6 +77,8 @@ class HiveCoreGraph(
         val rebroadcastHello: (suspend () -> Unit)? = null,
         /** the worker timeline (split flag): this phone's chunks for other phones, and its workers' mirrored for its own jobs */
         val workerActivity: com.hivecore.core.WorkerActivity? = null,
+        /** the presenter's controls (Settings > Demo); null on the JVM */
+        val demoPort: com.hivecore.ui.ports.DemoPort? = null,
         /** the live activity feed (one per process); the shell's activity sheet reads it */
         val feed: com.hivecore.core.ActivityFeed = com.hivecore.core.ActivityFeed(),
     )
@@ -102,7 +104,7 @@ class HiveCoreGraph(
     val swarm: SwarmViewModel by lazy { SwarmViewModel(swarmPort, workerPolicy, scope) }
     val models: ModelsViewModel by lazy { ModelsViewModel(modelsPort, modelRegistry, modelPool, selfId, scope) }
     val data: DataViewModel by lazy { DataViewModel(schema, dataAdmin, dataPort, scope) }
-    val settings: SettingsViewModel by lazy { SettingsViewModel(prefs, settingsPort, scope) }
+    val settings: SettingsViewModel by lazy { SettingsViewModel(prefs, settingsPort, scope, ports.demoPort) }
 
     companion object {
         @Volatile private var instance: HiveCoreGraph? = null

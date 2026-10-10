@@ -150,6 +150,9 @@ class SwarmViewModel(
         else _state.update { it.copy(pairing = Pairing.EnterLink("", false, null)) }
     }
 
+    /** The paste-a-link card (the scanner's "Paste instead"). */
+    fun pasteLink() { _state.update { it.copy(pairing = Pairing.EnterLink("", false, null)) } }
+
     fun setLink(text: String) { _state.update { s -> s.copy(pairing = (s.pairing as? Pairing.EnterLink)?.copy(link = text, error = null) ?: s.pairing) } }
 
     /** Joins with a scanned or pasted `swarm://join?...` link; the SAS then appears in [UiState.sas]. */

@@ -430,6 +430,9 @@ object AppWiring {
         val chooser = ClosedChooserImpl(llm)
         // OCR (spec 4.3 `ocr`, catalog `mlkit_text_latin`): ML Kit's bundled Latin recogniser, the document executors' seam
         val ocr: com.hivecore.core.Ocr? = if (Features.runtime) runCatching { com.hivecore.node.docai.MlKitOcr(app) }.getOrElse { warn("ocr: ${it.message}"); null } else null
+        // seeding a role loads its documents too (the seed docs are docx / pptx, so the PDF path never needs real OCR)
+        store.docSeeder = { _, names -> com.hivecore.node.docs.AssetDocSeeder.seed(app, docStore,
+            com.hivecore.node.docs.PdfExtractor(ocr ?: com.hivecore.core.fakes.FakeOcr(), app.cacheDir) {}, names) }
         lateinit var graph: SwarmGraph
         val policyFactory: (TaskRunnerImpl) -> WorkerPolicy = { runner ->
             val d = device; val pm = presence
@@ -585,7 +588,8 @@ object AppWiring {
         return HiveCoreGraph.Ports(selfId, askPort, jobRunner, swarmPort, graph.policy, modelsPort, registry, pool, store, store,
             if (Features.graph) dataPort else FakeDataPort(), settingsPort, consent, loadRecipes = recipes,
             approval = approval.takeIf { Features.meshTrust }, approvalKeys = approvalKeys, rebroadcastHello = { router.rebroadcastHello() },
-            workerActivity = activity)
+            workerActivity = activity,
+            demoPort = com.hivecore.app.demo.DemoPortImpl(app, prefs, store, db, stateDb, BuildConfig.DEBUG, Features.runtime) { HiveCoreGraph.get(app) })
     }
 
     /**

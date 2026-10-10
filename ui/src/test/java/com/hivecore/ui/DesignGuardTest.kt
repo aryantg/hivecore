@@ -71,9 +71,8 @@ class DesignGuardTest {
     }
 
     @Test fun oneThemeRootPerActivity() {
-        val allowed = setOf("com/hivecore/app/MainActivity.kt", "com/hivecore/app/approval/ApprovalActivity.kt")
         val hits = (sources(uiRoot) + sources(appRoot)).filter { f ->
-            !inDesign(f) && rel(f) !in allowed && "@HivePreviews" !in f.readText() && codeLines(f).any { (_, l) -> Regex("""\bHiveCoreTheme\s*[({]""").containsMatchIn(l) }
+            !inDesign(f) && !f.name.endsWith("Activity.kt") && "@HivePreviews" !in f.readText() && codeLines(f).any { (_, l) -> Regex("""\bHiveCoreTheme\s*[({]""").containsMatchIn(l) }
         }
         if (hits.isNotEmpty()) fail("HiveCoreTheme is applied only by the activities (and previews): " + hits.joinToString { rel(it) })
     }

@@ -15,6 +15,9 @@ fun HiveCoreTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composab
     }
 }
 
+/** Presenter switch: false hides plan and result hashes (Settings > Demo > Hide hashes). */
+val LocalShowHashes = androidx.compose.runtime.staticCompositionLocalOf { true }
+
 object HiveTheme {
     val colors: HiveColors @Composable get() = LocalHiveColors.current
 }

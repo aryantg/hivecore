@@ -55,7 +55,7 @@ fun ResultSheet(title: String, view: ResultView?, hash: String?, onCopy: (String
                 Spacer(Modifier.width(HiveSpacing.sm))
                 Column(Modifier.weight(1f)) {
                     Text("$title result", style = MaterialTheme.typography.titleLarge)
-                    Text(listOfNotNull(countLine(view), "hash ${Format.shortHash(hash)}").joinToString(" · "), style = HiveTextStyles.monoSmall,
+                    Text(listOfNotNull(countLine(view), if (com.hivecore.ui.design.LocalShowHashes.current) "hash ${Format.shortHash(hash)}" else null).joinToString(" · "), style = HiveTextStyles.monoSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
