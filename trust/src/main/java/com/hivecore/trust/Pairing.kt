@@ -33,10 +33,8 @@ interface Pairing {
 
 typealias Roster = RosterBody
 
-interface RosterStore {
-    fun current(groupId: String): Roster?
-    /** Applies a roster when its version is higher than the held one and `adminSig` verifies against the admin's pinned key. */
-    fun apply(roster: Roster): Boolean
-    fun isMember(nodeId: String): Boolean
-    fun isRevoked(nodeId: String): Boolean
-}
+/**
+ * The roster store lives in `:mesh` (`com.hivecore.mesh.RosterStore`, implemented by `RosterStoreImpl` over `SqlDb`)
+ * because `MeshRouter` applies ROSTER / REVOKE itself; this alias keeps the `:trust` name the other tracks code against.
+ */
+typealias RosterStore = com.hivecore.mesh.RosterStore

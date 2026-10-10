@@ -9,6 +9,7 @@ import com.hivecore.core.Transport
 import com.hivecore.core.fakes.FakeBus
 import com.hivecore.core.fakes.FakeSigner
 import com.hivecore.core.fakes.FakeTransport
+import com.hivecore.core.LinkKind
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -55,19 +56,23 @@ class MeshRouterTest {
         val nodeId get() = router.nodeId
         val got = ArrayList<Verified>()
         val pairings = ArrayList<PairingRequest>()
+        val failures = ArrayList<AuthFailure>()
+        /** The session layer the router put over the fake transport (spec 6.3). */
+        val secure: SecureTransport get() = router.secure()!!
 
         init {
             scope.launch { router.verified.collect { got += it } }
             scope.launch { router.pairing.collect { pairings += it } }
+            scope.launch { router.authFailures.collect { failures += it } }
         }
 
         fun pin(other: Node) = store.pin(other.nodeId, other.name, other.signer.publicKeyB64, other.approval.publicKeyB64, other.holds, clock)
         fun gotTypes() = got.map { it.type }
         fun got(type: MsgType) = got.filter { it.type == type }
 
-        /** Sends raw bytes to [to] straight through the transport (bypassing the router's checks). */
-        suspend fun raw(to: Node, bytes: ByteArray) = transport.send(to.transport.endpoint, bytes)
-        suspend fun raw(to: PeerEndpoint, bytes: ByteArray) = transport.send(to, bytes)
+        /** Sends raw bytes to [to] inside this node's session (bypassing the router's checks, not the session layer). */
+        suspend fun raw(to: Node, bytes: ByteArray) = secure.send(to.transport.endpoint, bytes)
+        suspend fun raw(to: PeerEndpoint, bytes: ByteArray) = secure.send(to, bytes)
     }
 
     private fun TestScope.node(bus: FakeBus, id: String, name: String, debug: Boolean = false) = Node(bus, id, name, scope(), debug)
@@ -132,15 +137,19 @@ class MeshRouterTest {
         val hr = node(bus, "hr", "HR"); val sales = node(bus, "sales", "Sales")
         sales.pin(hr)                         // hr does NOT pin sales
         startAll(hr, sales)
-        assertEquals(1, sales.got(MsgType.HELLO).size)   // sales knows hr
-        assertEquals(0, hr.got.size)                     // hr dropped the unknown HELLO
+        // Spec 6.3: without a pin on both sides there is no session, so not even a HELLO crosses in either direction.
+        assertEquals(0, sales.got.size)
+        assertEquals(0, hr.got.size)
         assertTrue(hr.router.peers.value.isEmpty())
-
-        sales.raw(hr, Wire.encode(MsgType.JOB, sales.nodeId, job(sales), sales.signer))
-        settle()
-        assertEquals(0, hr.got.size)                     // unknown signer
+        assertTrue(hr.router.connectedNodeIds().isEmpty()); assertTrue(sales.router.connectedNodeIds().isEmpty())
+        assertTrue(hr.failures.any { it.reason.contains("not paired") })
+        assertTrue(sales.raw(hr, Wire.encode(MsgType.JOB, sales.nodeId, job(sales), sales.signer)).isFailure)   // no session to seal in
 
         hr.pin(sales)
+        hr.router.refreshSessions()
+        settle()
+        assertEquals(1, sales.got(MsgType.HELLO).size); assertEquals(1, hr.got(MsgType.HELLO).size)
+        hr.got.clear()
         // Signed with the wrong key for `from`.
         sales.raw(hr, Wire.encode(MsgType.JOB, sales.nodeId, job(sales), FakeSigner()))
         // Body tampered after signing.
@@ -317,18 +326,26 @@ class MeshRouterTest {
         val hr = node(bus, "hr", "HR"); val sales = node(bus, "sales", "Sales")
         startAll(hr, sales)
         assertNull(hr.store.get(sales.nodeId))
-        // Nearby raises its own request (with its own digits) on the connection.
+        assertTrue(hr.secure.sessions.value.isEmpty())   // unpinned on both sides: the handshake was refused
+        // Nearby raises its own request (with its own digits) on each phone's side of the connection.
         val req = PairingRequest(sales.transport.endpoint, "4321")
         hr.transport.raisePairing(req)
         settle()
         assertEquals(listOf(req), hr.pairings)
         hr.router.accept(req, true)
         assertEquals(req to true, hr.transport.pairingDecisions.single())
-        // The HELLO that follows the accepted connection pins without a second prompt.
-        sales.router.rebroadcastHello()
         settle()
+        assertNull(hr.store.get(sales.nodeId))           // sales has not accepted yet: still no session, nothing pinned
+        val req2 = PairingRequest(hr.transport.endpoint, "4321")
+        sales.transport.raisePairing(req2)
+        settle()
+        sales.router.accept(req2, true)
+        settle()
+        // The session opens on the accepted link and the HELLOs that follow pin without a second prompt.
         assertEquals(sales.signer.publicKeyB64, hr.store.get(sales.nodeId)!!.pubkey)
-        assertEquals(1, hr.pairings.size)
+        assertEquals(hr.signer.publicKeyB64, sales.store.get(hr.nodeId)!!.pubkey)
+        assertEquals(1, hr.pairings.size); assertEquals(1, sales.pairings.size)
+        assertEquals(listOf(sales.nodeId), hr.router.connectedNodeIds())
     }
 
     // ------------------------------------------------------------------ pinned-node updates
@@ -444,23 +461,34 @@ class MeshRouterTest {
         override fun disconnect(endpoint: PeerEndpoint) { closed += endpoint }
     }
 
-    @Test fun anUnpinnedHelloOutsidePairingClosesThatLinkAndOversizeEnvelopesAreDropped() = runTest {
+    @Test fun anUnpairedPeerIsRefusedItsLinkClosedAndOversizeEnvelopesAreDropped() = runTest {
         val bus = FakeBus()
         val sales = node(bus, "sales", "Sales")
         val hrT = Closing(bus.node("hr", "HR"))
         val hrSigner = FakeSigner()
         val hrStore = PeerStore(JdbcSqlDb.inMemory())
-        val hr = MeshRouter(mapOf("fake" to hrT), hrSigner, hrStore, { HelloBody("", "HR", "") }, scope(), now = { clock })
+        val warned = ArrayList<Pair<String, String>>()
+        val hr = MeshRouter(mapOf("fake" to hrT), hrSigner, hrStore, { HelloBody("", "HR", "") }, scope(), now = { clock },
+            onAuthFailure = { peer, reason -> warned += peer to reason })
         val got = ArrayList<Verified>()
         val s = scope(); s.launch { hr.verified.collect { got += it } }
+        sales.store.pin(hr.nodeId, "HR", hrSigner.publicKeyB64, null, emptyList(), clock)   // sales paired; hr did not
         testScheduler.runCurrent()
         hr.start(); sales.router.start()
         settle()
-        assertEquals(listOf(sales.transport.endpoint.endpointId), hrT.closed.map { it.endpointId })
+        // Spec 6.3: the unpaired handshake is refused below the router, the link is dropped and the warning names the peer.
+        assertEquals(listOf(sales.transport.endpoint.endpointId), hrT.closed.map { it.endpointId }.distinct())
         assertNull(hrStore.get(sales.nodeId))
+        assertTrue(got.isEmpty())
+        assertEquals(1, warned.size)
+        assertEquals(sales.nodeId.take(8), warned.single().first)   // no name known yet: the nodeId prefix
+        assertTrue(warned.single().second.contains("not paired"))
 
         // Pinned now; a 70 KB envelope is dropped before it is parsed, a normal one passes.
         hrStore.pin(sales.nodeId, "Sales", sales.signer.publicKeyB64, null, emptyList(), clock)
+        hr.refreshSessions()
+        settle()
+        assertEquals(1, got.count { it.type == MsgType.HELLO })
         val huge = MeshJson.encode(JobBody("job-big", "n-big", clock, sales.nodeId, "Sales", "x".repeat(70 * 1024)))
         sales.raw(PeerEndpoint("fake", "hr", "HR"), Wire.encode(MsgType.JOB, sales.nodeId, huge, sales.signer))
         sales.raw(PeerEndpoint("fake", "hr", "HR"), Wire.encode(MsgType.JOB, sales.nodeId, job(sales), sales.signer))
@@ -482,6 +510,61 @@ class MeshRouterTest {
         settle()
         assertTrue(sales.router.clockSkew.value.isEmpty())
         assertEquals(1, sales.got(MsgType.JOB).size)
+    }
+
+    // ------------------------------------------------------------------ spec 6.3: sessions on every transport
+
+    @Test fun everythingOnTheWireIsCiphertext() = runTest {
+        val bus = FakeBus()
+        val hr = node(bus, "hr", "HR"); val sales = node(bus, "sales", "Sales")
+        hr.pin(sales); sales.pin(hr)
+        startAll(hr, sales)
+        assertEquals(1, sales.got(MsgType.HELLO).size)
+        hr.router.broadcast(MsgType.JOB, job(hr))
+        settle()
+        assertEquals(1, sales.got(MsgType.JOB).size)
+        val frames = hr.transport.sent + sales.transport.sent
+        assertTrue(frames.any { it.second[0] == Session.TAG_SEALED })
+        for ((_, bytes) in frames) {
+            val text = String(bytes, Charsets.ISO_8859_1)
+            assertFalse(bytes[0] == '{'.code.toByte())
+            for (word in listOf("\"type\"", "\"from\"", "\"sig\"", "\"body\"", "HELLO", "JOB", "commission", hr.nodeId, sales.nodeId))
+                assertFalse("plaintext '$word' on the wire", text.contains(word))
+        }
+        assertEquals(LinkKind.LAN, hr.secure.link(sales.nodeId).kind)
+        assertEquals(0, hr.secure.refusedFrames)
+    }
+
+    @Test fun aKeyThatDiffersFromThePinIsAnAuthenticationFailureNamingThePeer() = runTest {
+        val bus = FakeBus()
+        val hr = node(bus, "hr", "HR"); val sales = node(bus, "sales", "Sales")
+        val warned = ArrayList<Pair<String, String>>()
+        hr.router.onAuthFailure = { p, r -> warned += p to r }
+        sales.pin(hr)
+        hr.store.pin(sales.nodeId, "Sales", FakeSigner().publicKeyB64, null, emptyList(), clock)   // an impostor key under sales' id
+        startAll(hr, sales)
+        assertTrue(hr.got.isEmpty()); assertTrue(sales.got.isEmpty())
+        assertTrue(hr.router.connectedNodeIds().isEmpty())
+        assertEquals("Sales", warned.single().first)
+        assertTrue(warned.single().second.contains("differs from the pinned key"))
+        assertEquals(warned.single().first, hr.failures.single().peer)
+        // The same failure within a minute is not reported twice.
+        hr.router.refreshSessions(); settle()
+        assertEquals(1, warned.size)
+    }
+
+    @Test fun forgettingAPeerClosesItsSessionOnBothSides() = runTest {
+        val bus = FakeBus()
+        val hr = node(bus, "hr", "HR"); val sales = node(bus, "sales", "Sales")
+        hr.pin(sales); sales.pin(hr)
+        startAll(hr, sales)
+        assertEquals(listOf(sales.nodeId), hr.router.connectedNodeIds())
+        hr.router.forget(sales.nodeId)
+        settle()
+        assertTrue(hr.secure.sessions.value.isEmpty())
+        assertTrue(sales.secure.sessions.value.isEmpty())
+        assertTrue(hr.router.send(sales.nodeId, MsgType.JOB, job(hr)).isFailure)
+        assertTrue(sales.router.send(hr.nodeId, MsgType.JOB, job(sales)).isFailure)
     }
 
     @Test fun transportSwitchAndBondedForwarding() = runTest {

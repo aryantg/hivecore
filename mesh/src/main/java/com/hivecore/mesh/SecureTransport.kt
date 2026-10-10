@@ -12,7 +12,6 @@ import com.hivecore.core.Verify
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -142,7 +141,12 @@ class Session internal constructor(
     @Volatile var closed: Boolean = false
         internal set
     internal val pings = LinkedHashMap<Long, Long>()
-    internal var measurer: Job? = null
+    /** Clock time of the last completed link echo (0 = none yet); the session layer re-measures when it is stale. */
+    @Volatile internal var measuredAt: Long = 0L
+    @Volatile internal var pingInFlight: Boolean = false
+
+    /** Spec 6.2: the 6-digit short authentication string both phones show, derived from the handshake hash. */
+    fun sas(): String = SecureTransport.sas(handshakeHash)
 
     /** Current send epoch (number of rekeys so far). */
     val epoch: Int get() = synchronized(this) { sendEpoch }
@@ -200,6 +204,8 @@ class Session internal constructor(
     companion object {
         const val TAG_SEALED: Byte = 0xB0.toByte()
         const val HEADER = 1 + 4 + 8
+        /** Bytes a SEALED frame adds to its payload: header, kind byte and the 16-byte GCM tag. */
+        const val OVERHEAD = HEADER + 1 + 16
         const val KIND_DATA: Byte = 0
         const val KIND_PING: Byte = 1
         const val KIND_PONG: Byte = 2
@@ -228,8 +234,12 @@ class Session internal constructor(
  * @param scope          collectors and link measurement run here
  * @param allowUnpinned  admits an unpinned peer's handshake outside pairing mode (an SAS pairing in progress); such a
  *                       session carries only CONTROL frames until the peer is pinned
+ * @param admitEndpoint  admits and exposes an unpinned peer on this endpoint: a transport-level pairing (Nearby digits)
+ *                       the user accepted, whose first HELLO the router pins
  * @param onAuthFailure  (peer, reason) for the UI warning; peer is the claimed nodeId or `endpoint:<name>`
- * @param measureEveryMs link echo period after the one at session start; 0 = only at session start
+ * @param measureEveryMs after the echo at session start, a [link] or [measureLink] call older than this re-measures
+ *                       in the background (no timer: a 5-minute loop would never let a virtual-time test go idle);
+ *                       0 = only at session start
  */
 class SecureTransport(
     val inner: Transport,
@@ -238,6 +248,7 @@ class SecureTransport(
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val scope: CoroutineScope,
     var allowUnpinned: (nodeId: String, pubkey: String) -> Boolean = { _, _ -> false },
+    var admitEndpoint: (endpoint: PeerEndpoint) -> Boolean = { false },
     onAuthFailure: (peer: String, reason: String) -> Unit = { _, _ -> },
     private val measureEveryMs: Long = LINK_MEASURE_INTERVAL_MS,
     private val rekeyIntervalMs: Long = REKEY_INTERVAL_MS,
@@ -338,8 +349,29 @@ class SecureTransport(
         refresh()
     }
 
-    override suspend fun measureLink(endpoint: PeerEndpoint): Link =
-        synchronized(lock) { byEndpoint[key(endpoint)] }?.link ?: inner.measureLink(endpoint)
+    override suspend fun measureLink(endpoint: PeerEndpoint): Link {
+        val s = synchronized(lock) { byEndpoint[key(endpoint)] } ?: return inner.measureLink(endpoint)
+        remeasureIfStale(s)
+        return s.link
+    }
+
+    /** True while the carrier lists [endpoint], whether or not a session exists on it (the router keeps pairing state per link). */
+    fun hasLink(endpoint: PeerEndpoint): Boolean = synchronized(lock) { innerConnected.any { key(it) == key(endpoint) } }
+
+    /** Starts a handshake on [endpoint] when the carrier has the link but no session or handshake exists (a retry after a refusal). */
+    fun retry(endpoint: PeerEndpoint) {
+        val k = key(endpoint)
+        val go = synchronized(lock) { innerConnected.any { key(it) == k } && k !in byEndpoint && k !in pending }
+        if (go) scope.launch { initiate(endpoint) }
+    }
+
+    private fun remeasureIfStale(s: Session) {
+        if (measureEveryMs <= 0 || s.closed) return
+        val stale = synchronized(s) {
+            if (s.pingInFlight || clock() - s.measuredAt < measureEveryMs) false else { s.pingInFlight = true; true }
+        }
+        if (stale) scope.launch { ping(s) }
+    }
 
     override fun disconnect(endpoint: PeerEndpoint) {
         val s = synchronized(lock) { pending.remove(key(endpoint)); byEndpoint.remove(key(endpoint)) }
@@ -364,7 +396,11 @@ class SecureTransport(
 
     override fun session(peer: String): Session? = synchronized(lock) { byEndpoint.values.lastOrNull { it.peerNodeId == peer } }
 
-    override fun link(peer: String): Link = session(peer)?.link ?: Link.defaultFor(kind)
+    override fun link(peer: String): Link {
+        val s = session(peer) ?: return Link.defaultFor(kind)
+        remeasureIfStale(s)
+        return s.link
+    }
 
     /** Sends a CONTROL message (pairing) inside [session]. */
     suspend fun sendControl(session: Session, bytes: ByteArray): Result<Unit> {
@@ -391,10 +427,13 @@ class SecureTransport(
             val pinned = pinnedKeyOf(s.peerNodeId)
             when {
                 pinned != null && pinned != s.peerPubkey -> { fail(s.endpoint, s.peerNodeId, "node key differs from the pinned key"); disconnect(s.endpoint) }
-                pinned == null && !admitted(s.peerNodeId, s.peerPubkey) -> disconnect(s.endpoint)
+                pinned == null && !admitted(s.endpoint, s.peerNodeId, s.peerPubkey) -> disconnect(s.endpoint)
             }
         }
         publish()
+        // A link that lost its session to a refusal gets a new handshake now that the pins changed.
+        val retry = synchronized(lock) { innerConnected.filter { key(it) !in byEndpoint && key(it) !in pending } }
+        for (ep in retry) scope.launch { initiate(ep) }
     }
 
     // ------------------------------------------------------------------ inbound
@@ -487,7 +526,7 @@ class SecureTransport(
         val payload = try { NoiseCrypto.open(k.copyOfRange(0, 32), ZERO_IV, h2, ct) } catch (_: Exception) {
             throw HandshakeFailure(null, CODE_BAD, "SESSION_RESP does not decrypt")
         }
-        val (peerId, peerKey) = verifyIdentity(payload, SIG_RESP, h2)
+        val (peerId, peerKey) = verifyIdentity(ep, payload, SIG_RESP, h2)
         val h3 = NoiseCrypto.sha256(h2, ct)
         val finCt = NoiseCrypto.seal(k.copyOfRange(32, 64), ZERO_IV, h3, identityPayload(SIG_INIT, h3))
         val fin = Bytes().u8(TAG_FIN).u8(PROTO).blob(finCt).bytes()
@@ -510,7 +549,7 @@ class SecureTransport(
         val payload = try { NoiseCrypto.open(hs.kFin, ZERO_IV, hs.h, ct) } catch (_: Exception) {
             throw HandshakeFailure(null, CODE_BAD, "SESSION_FIN does not decrypt")
         }
-        val (peerId, peerKey) = verifyIdentity(payload, SIG_INIT, hs.h)
+        val (peerId, peerKey) = verifyIdentity(ep, payload, SIG_INIT, hs.h)
         val h4 = NoiseCrypto.sha256(hs.h, ct)
         val tk = NoiseCrypto.hkdf(h4, hs.ee, "sn transport", 64)
         val s = Session(ep, peerId, peerKey, h4, initiator = false, sendKey = tk.copyOfRange(32, 64), recvKey = tk.copyOfRange(0, 32),
@@ -533,6 +572,7 @@ class SecureTransport(
         s?.let { retire(it) }
         publish()
         report(ep, s?.peerNodeId, "peer refused the session (${CODE_NAMES[code] ?: "code $code"})")
+        (inner as? Disconnectable)?.disconnect(ep)   // spec 6.3: an authentication failure drops the link on both ends
     }
 
     private suspend fun onSealed(ep: PeerEndpoint, frame: ByteArray) {
@@ -568,7 +608,7 @@ class SecureTransport(
     }
 
     /** Checks the peer's static key and transcript signature, then the pin. Returns (nodeId, pubkeyB64). */
-    private fun verifyIdentity(payload: ByteArray, label: ByteArray, h: ByteArray): Pair<String, String> {
+    private fun verifyIdentity(ep: PeerEndpoint, payload: ByteArray, label: ByteArray, h: ByteArray): Pair<String, String> {
         val rd = Reader(payload, 0)
         val pub = rd.blob(MAX_KEY)
         val sig = rd.blob(MAX_KEY); rd.end()
@@ -578,16 +618,17 @@ class SecureTransport(
         if (nodeId == selfId) throw HandshakeFailure(nodeId, CODE_BAD, "peer presented this phone's own key")
         val pinned = pinnedKeyOf(nodeId)
         if (pinned != null && pinned != pubB64) throw HandshakeFailure(nodeId, CODE_KEY, "node key differs from the pinned key")
-        if (pinned == null && !admitted(nodeId, pubB64)) throw HandshakeFailure(nodeId, CODE_UNPAIRED, "node is not paired")
+        if (pinned == null && !admitted(ep, nodeId, pubB64)) throw HandshakeFailure(nodeId, CODE_UNPAIRED, "node is not paired")
         return nodeId to pubB64
     }
 
-    private fun admitted(nodeId: String, pubkey: String): Boolean =
-        synchronized(lock) { pairingMode } || runCatching { allowUnpinned(nodeId, pubkey) }.getOrDefault(false)
+    private fun admitted(ep: PeerEndpoint, nodeId: String, pubkey: String): Boolean =
+        synchronized(lock) { pairingMode } || runCatching { admitEndpoint(ep) }.getOrDefault(false) ||
+            runCatching { allowUnpinned(nodeId, pubkey) }.getOrDefault(false)
 
-    /** A session reaches the router only when its peer is pinned with this key (or the router is pairing). */
-    private fun exposed(s: Session): Boolean =
-        !s.closed && (pinnedKeyOf(s.peerNodeId) == s.peerPubkey || synchronized(lock) { pairingMode })
+    /** A session reaches the router only when its peer is pinned with this key, the router is pairing, or its endpoint was admitted. */
+    private fun exposed(s: Session): Boolean = !s.closed &&
+        (pinnedKeyOf(s.peerNodeId) == s.peerPubkey || synchronized(lock) { pairingMode } || runCatching { admitEndpoint(s.endpoint) }.getOrDefault(false))
 
     private fun established(s: Session) {
         val old: Session?
@@ -601,13 +642,8 @@ class SecureTransport(
         ws.forEach { it.complete(s) }
         listeners.forEach { runCatching { it.onOpen(s) } }
         publish()
-        s.measurer = scope.launch {
-            while (!s.closed) {
-                ping(s)
-                if (measureEveryMs <= 0) break
-                delay(measureEveryMs)
-            }
-        }
+        synchronized(s) { s.pingInFlight = true }
+        scope.launch { ping(s) }
     }
 
     private suspend fun ping(s: Session) {
@@ -624,12 +660,12 @@ class SecureTransport(
         val rtt = maxOf(1L, clock() - t0)
         val kbps = (2L * payload.size * 8 / rtt).coerceIn(1L, MAX_KBPS.toLong()).toInt()
         s.link = Link(inner.kind, kbps, rtt.toInt(), s.link.metered)
+        synchronized(s) { s.measuredAt = clock(); s.pingInFlight = false }
     }
 
     private fun retire(s: Session) {
         if (s.closed) return
         s.closed = true
-        s.measurer?.cancel()
         listeners.forEach { runCatching { it.onClose(s) } }
     }
 
@@ -642,7 +678,8 @@ class SecureTransport(
         connectedState.value = list
     }
 
-    private fun exposedLocked(s: Session): Boolean = !s.closed && (pinnedKeyOf(s.peerNodeId) == s.peerPubkey || pairingMode)
+    private fun exposedLocked(s: Session): Boolean = !s.closed &&
+        (pinnedKeyOf(s.peerNodeId) == s.peerPubkey || pairingMode || runCatching { admitEndpoint(s.endpoint) }.getOrDefault(false))
 
     private suspend fun abort(ep: PeerEndpoint, peer: String?, code: Int, reason: String) {
         synchronized(lock) { pending.remove(key(ep)); failWaiters(key(ep), reason) }
@@ -720,6 +757,19 @@ class SecureTransport(
         private val SIG_RESP = "SN-SESSION-RESP\u0000".toByteArray(Charsets.UTF_8)
         private val SIG_INIT = "SN-SESSION-INIT\u0000".toByteArray(Charsets.UTF_8)
         private val ZERO_IV = ByteArray(12)
+
+        /**
+         * Spec 6.2 / 20.2: the 6-digit SAS from the handshake hash `h4`: the first 4 bytes of
+         * `SHA256("SN-SAS\u0000" || h4)` as an unsigned integer, modulo 10^6, zero-padded. Both sides hold the same `h4`
+         * only when they completed the same handshake, so a relay or network attacker who substituted keys shows
+         * different digits on the two phones.
+         */
+        fun sas(handshakeHash: ByteArray): String {
+            val d = NoiseCrypto.sha256(SAS_LABEL, handshakeHash)
+            val v = ((d[0].toLong() and 0xff) shl 24) or ((d[1].toLong() and 0xff) shl 16) or ((d[2].toLong() and 0xff) shl 8) or (d[3].toLong() and 0xff)
+            return "%06d".format(v % 1_000_000L)
+        }
+        private val SAS_LABEL = "SN-SAS\u0000".toByteArray(Charsets.UTF_8)
 
         private fun compare(a: ByteArray, b: ByteArray): Int {
             for (i in 0 until minOf(a.size, b.size)) {
