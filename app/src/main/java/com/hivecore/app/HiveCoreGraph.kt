@@ -77,6 +77,8 @@ class HiveCoreGraph(
         val rebroadcastHello: (suspend () -> Unit)? = null,
         /** the worker timeline (split flag): this phone's chunks for other phones, and its workers' mirrored for its own jobs */
         val workerActivity: com.hivecore.core.WorkerActivity? = null,
+        /** the live activity feed (one per process); the shell's activity sheet reads it */
+        val feed: com.hivecore.core.ActivityFeed = com.hivecore.core.ActivityFeed(),
     )
 
     val selfId: String get() = ports.selfId
@@ -92,6 +94,7 @@ class HiveCoreGraph(
     val dataPort: DataPort get() = ports.dataPort
     val settingsPort: SettingsPort get() = ports.settingsPort
     val consent: CloudConsent? get() = ports.consent
+    val feed: com.hivecore.core.ActivityFeed get() = ports.feed
 
     val ask: AskViewModel by lazy { AskViewModel(askPort, prefs, scope) }
     val jobs: JobsViewModel by lazy { JobsViewModel(jobRunner, swarmPort.peers, ports.loadRecipes, scope, resultHash = { p -> p.resultRef?.removePrefix("split:") },
@@ -118,7 +121,11 @@ class HiveCoreGraph(
                 SLog.e("Graph", "wiring failed; the screens run over the fakes", e)
                 fakePorts(Features.enabled())
             }
-            return HiveCoreGraph(prefs, ports, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
+            return HiveCoreGraph(prefs, ports, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)).also { g ->
+                com.hivecore.core.Feed.current = g.feed
+                g.feed.attachWarnings()
+                runCatching { com.hivecore.app.demo.FeedBridges.start(g, g.feed, scope) }.onFailure { SLog.e("Graph", "feed bridges failed", it) }
+            }
         }
 
         /** The fake ports, the shape every flag set keeps on the JVM (and the phone's fallback when wiring fails). */

@@ -21,6 +21,9 @@ object SLog {
     private val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
     @Volatile private var file: File? = null
 
+    /** Also receives every line (level "D" / "W" / "E", tag, message); the activity feed listens here. Never throws into the caller. */
+    @Volatile var sink: ((level: String, tag: String, msg: String) -> Unit)? = null
+
     /** Absolute path of the log file, or null before [init]. */
     val path: String? get() = file?.absolutePath
 
@@ -39,6 +42,7 @@ object SLog {
 
     @Synchronized
     private fun write(level: String, tag: String, msg: String) {
+        sink?.let { s -> try { s(level, tag, msg) } catch (_: Exception) { } }
         val f = file ?: return
         try {
             if (f.length() > MAX_BYTES) {

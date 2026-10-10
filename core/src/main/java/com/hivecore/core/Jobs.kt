@@ -87,6 +87,8 @@ enum class ChunkState { QUEUED, RUNNING, DONE, DUPLICATED, FAILED }
     val cloud: List<String> = emptyList(),
     /** chunks accepted from a single phone ("not verified", section 12.1) */
     val unverified: Int = 0,
+    /** the merged output once done (recipes: `{"stages":{...}}`), so the result viewer can show it; null before and when not kept */
+    val result: kotlinx.serialization.json.JsonElement? = null,
 )
 
 interface JobRunner {

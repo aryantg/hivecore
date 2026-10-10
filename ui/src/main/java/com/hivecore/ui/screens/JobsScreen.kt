@@ -56,6 +56,7 @@ import com.hivecore.ui.design.listOrEmpty
 import com.hivecore.ui.design.loading
 import com.hivecore.ui.design.section
 import com.hivecore.ui.vm.JobFormat
+import com.hivecore.ui.vm.ResultViews
 import com.hivecore.ui.vm.JobsViewModel
 import com.hivecore.ui.vm.JobsViewModel.Phase
 import java.io.File
@@ -74,6 +75,9 @@ fun JobsRoute(vm: JobsViewModel, onPickFiles: ((List<String>) -> Unit)? = null, 
         onPrompt = vm::setPrompt, onPrivate = vm::setPrivate, onRun = vm::run, onCancel = vm::cancel, onNewJob = vm::newJob, onSelectChunk = vm::selectChunk,
         onOpenResult = vm::openResult, onOpenHistory = vm::openHistory, onResume = vm::resume, onRerun = vm::rerun, onRetryRecipes = vm::loadRecipes,
         onDismissMessage = vm::dismissMessage, onSamplePhotos = onSamplePhotos)
+    val current = state.current
+    if (state.viewingResult && current != null) ResultSheet(current.title, ResultViews.of(current, state.currentRecipe), state.resultHash ?: current.resultRef,
+        onCopy = vm::copyResult, onClose = vm::closeResult)
 }
 
 /** "2.6×" for the best finished job so far, or null. */

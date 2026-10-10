@@ -22,6 +22,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
@@ -125,9 +128,24 @@ fun HiveCoreShell(
             },
         ) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
+                val last = status.lastEvent
+                if (status.jobRunning && last != null) LastEventStrip(last, onOpenFeed)
                 banner()
                 Box(Modifier.weight(1f)) { registry.content(nav.current) }
             }
+        }
+    }
+}
+
+/** While a job runs: the newest activity line under the top bar ("12:04:31 · Chunk 7 done on Sales"); taps open the feed. */
+@Composable
+private fun LastEventStrip(line: String, onOpen: (() -> Unit)?) {
+    Surface(color = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        modifier = Modifier.fillMaxWidth().let { if (onOpen != null) it.clickable(onClick = onOpen) else it }) {
+        Row(Modifier.padding(horizontal = HiveSpacing.screenH, vertical = HiveSpacing.xs), verticalAlignment = Alignment.CenterVertically) {
+            Icon(HiveIcons.activity, contentDescription = null, modifier = Modifier.size(HiveSpacing.iconSm))
+            Spacer(Modifier.width(HiveSpacing.sm))
+            Text(line, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

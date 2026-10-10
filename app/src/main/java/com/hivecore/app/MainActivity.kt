@@ -12,6 +12,13 @@ import com.hivecore.ui.design.HiveCoreTheme
 import com.hivecore.ui.shell.HiveCoreShell
 import com.hivecore.ui.shell.rememberHiveNav
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.hivecore.ui.screens.FeedSheet
+import com.hivecore.ui.screens.feedLine
 
 class MainActivity : ComponentActivity() {
     private val permissions = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { r ->
@@ -42,15 +49,20 @@ class MainActivity : ComponentActivity() {
         setContent {
             HiveCoreTheme {
                 val nav = rememberHiveNav()
+                var showFeed by remember { mutableStateOf(false) }
+                val events by graph.feed.events.collectAsStateWithLifecycle()
+                val unread by graph.feed.unread.collectAsStateWithLifecycle()
                 HiveCoreShell(
                     registry = ScreenRegistry(Features.screens(graph)),
                     nav = nav,
-                    status = Features.shellStatus(graph),
+                    status = Features.shellStatus(graph).copy(unreadEvents = unread, lastEvent = events.firstOrNull()?.let { feedLine(it) }),
+                    onOpenFeed = { showFeed = true; graph.feed.markRead() },
                     // spec 17: the pending-approval card is the fallback when the notification does not surface
                     banner = { graph.ports.approval?.let { ApprovalBanner(it, this@MainActivity) } },
                     onTryInChat = { prompt -> graph.ask.setRequest(prompt) },
                 )
                 graph.consent?.let { ConsentSheetHost(it) }
+                if (showFeed) FeedSheet(events, onClear = { graph.feed.clear() }, onDismiss = { showFeed = false; graph.feed.markRead() })
             }
         }
         handleInvite(intent, graph)

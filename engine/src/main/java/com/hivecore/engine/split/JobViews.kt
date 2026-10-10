@@ -44,6 +44,7 @@ object JobViews {
             resumable = p.resumable,
             cloud = p.cloud,
             unverified = p.unverified,
+            result = if (p.done) p.result else null,
         )
     }
 

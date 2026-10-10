@@ -78,6 +78,8 @@ class JobsViewModel(
         /** jobIds whose request this session knows (re-run is possible) */
         val rerunnable: Set<String> = emptySet(),
         val message: String? = null,
+        /** the result sheet is open on [current] */
+        val viewingResult: Boolean = false,
         /** jobs this phone is working on (or just worked on) for other phones, most recent first */
         val working: List<WorkerTimeline.WorkingFor> = emptyList(),
         /** while this phone's job is placed and has no chunk grid yet: each worker's latest event (name, event) */
@@ -103,6 +105,14 @@ class JobsViewModel(
     var openResult: (String) -> Unit = { SLog.w(TAG, "openResult not wired: $it") }
 
     private val requests = HashMap<String, JobRequest>()
+
+    /** Copies text to the clipboard (set by the app). */
+    var copyText: (String) -> Unit = { SLog.w(TAG, "copyText not wired") }
+
+    /** Spec section 17 "identical to single-phone": the last finished hash per request, to compare a one-phone run with a swarm run. */
+    private data class Finished(val jobId: String, val hash: String, val phones: Int)
+    private val finished = HashMap<String, Finished>()
+    private val verdicts = HashMap<String, Boolean>()
     private var runJob: Job? = null
 
     init {
@@ -211,12 +221,39 @@ class JobsViewModel(
 
     fun selectChunk(index: Int?) { _state.update { s -> s.copy(selectedChunk = if (s.selectedChunk == index) null else index) } }
 
-    fun openResult() { _state.value.current?.resultRef?.let { openResult(it) } }
+    /** Opens the result sheet when the merged output is on hand, else hands the ref to the app. */
+    fun openResult() {
+        val c = _state.value.current ?: return
+        if (c.result != null) _state.update { it.copy(viewingResult = true) } else c.resultRef?.let { openResult(it) }
+    }
+
+    fun closeResult() { _state.update { it.copy(viewingResult = false) } }
+
+    fun copyResult(text: String) { copyText(text); _state.update { it.copy(message = "Result copied as CSV") } }
 
     fun dismissMessage() { _state.update { it.copy(message = null) } }
 
-    private fun show(p: JobProgress, phase: Phase) {
+    private fun show(p0: JobProgress, phase: Phase) {
+        val p = withIdentical(p0)
         _state.update { it.copy(current = p, phase = phase, lanes = lanes(p), preparing = emptyList(), resultHash = if (p.done) runCatching { resultHash(p) }.getOrNull() else null, rerunnable = requests.keys.toSet()) }
+    }
+
+    /**
+     * Sets `identicalToSingle` honestly: when the same request finished before and either run used one phone, the
+     * two result hashes are compared; otherwise it stays null and the screen shows no badge.
+     */
+    private fun withIdentical(p: JobProgress): JobProgress {
+        if (!p.done || p.error != null || p.identicalToSingle != null) return p
+        verdicts[p.jobId]?.let { return p.copy(identicalToSingle = it) }
+        val req = requests[p.jobId] ?: return p
+        val hash = runCatching { resultHash(p) }.getOrNull() ?: p.resultRef ?: return p
+        val key = requestKey(req)
+        val before = finished[key]
+        if (before == null || before.jobId != p.jobId) finished[key] = Finished(p.jobId, hash, p.nodes.size)
+        if (before == null || before.jobId == p.jobId || (before.phones != 1 && p.nodes.size != 1)) return p
+        val same = before.hash == hash
+        verdicts[p.jobId] = same
+        return p.copy(identicalToSingle = same)
     }
 
     private fun lanes(p: JobProgress): List<PhoneLane> {
@@ -237,6 +274,9 @@ class JobsViewModel(
 
     companion object {
         private const val TAG = "JobsVM"
+
+        /** Two runs are "the same job" when the recipe (or op), the items and the parameters match; private mode may differ. */
+        fun requestKey(r: JobRequest): String = "${r.recipeId ?: r.op}|${r.inputs.sorted().joinToString("|")}|${r.params}"
         val FILE_INPUTS = setOf("files", "images")
 
         fun phaseOf(p: JobProgress): Phase = when {
@@ -261,6 +301,9 @@ object JobFormat {
         x >= 1.0 -> String.format(Locale.US, "%.1f× faster than this phone alone", x)
         else -> String.format(Locale.US, "%.1f× (slower than this phone alone)", x)
     }
+
+    /** The badge text, or null when nothing was compared (the screen then shows no badge). */
+    fun identicalOrNull(v: Boolean?): String? = v?.let { identical(it) }
 
     fun identical(v: Boolean?): String = when (v) {
         true -> "✓ identical to single-phone result"

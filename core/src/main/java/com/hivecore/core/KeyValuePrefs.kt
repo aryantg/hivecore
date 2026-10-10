@@ -10,6 +10,9 @@ interface KeyValuePrefs {
     fun putInt(key: String, value: Int)
     fun getString(key: String, default: String?): String?
     fun putString(key: String, value: String?)
+    /** Every stored key (the demo reset clears prefixes such as `release:`); empty when the store cannot list. */
+    fun keys(): Set<String> = emptySet()
+    fun remove(key: String) {}
 
     companion object {
         const val FILE = "hivecore"
@@ -28,6 +31,8 @@ class SharedPrefsKv(context: Context) : KeyValuePrefs {
     override fun putInt(key: String, value: Int) { prefs.edit().putInt(key, value).apply() }
     override fun getString(key: String, default: String?) = prefs.getString(key, default)
     override fun putString(key: String, value: String?) { prefs.edit().putString(key, value).apply() }
+    override fun keys(): Set<String> = prefs.all.keys.toSet()
+    override fun remove(key: String) { prefs.edit().remove(key).apply() }
 }
 
 /** In-memory prefs for JVM tests and previews. */
@@ -39,4 +44,6 @@ class MemoryPrefs : KeyValuePrefs {
     override fun putInt(key: String, value: Int) { map[key] = value }
     override fun getString(key: String, default: String?) = map[key] as? String ?: default
     override fun putString(key: String, value: String?) { map[key] = value }
+    override fun keys(): Set<String> = map.keys.toSet()
+    override fun remove(key: String) { map.remove(key) }
 }
