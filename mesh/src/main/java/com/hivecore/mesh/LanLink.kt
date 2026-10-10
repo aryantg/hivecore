@@ -5,6 +5,7 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import com.hivecore.core.SLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -132,7 +133,16 @@ class NsdLanDiscovery(context: Context) : LanDiscovery {
 
     private val nsd = context.applicationContext.getSystemService(Context.NSD_SERVICE) as NsdManager
     private val peersState = MutableStateFlow<List<LanPeer>>(emptyList())
-    override val peers: StateFlow<List<LanPeer>> = peersState
+    /** NSD finds first, then beacon-only peers (an access point that filters multicast delivers only the latter). */
+    override val peers: StateFlow<List<LanPeer>> get() = merged
+    private val beacon = LanBeacon()
+    private val merged = MutableStateFlow<List<LanPeer>>(emptyList())
+    private val mergeScope = kotlinx.coroutines.CoroutineScope(Dispatchers.Default + kotlinx.coroutines.SupervisorJob())
+    init {
+        mergeScope.launch {
+            kotlinx.coroutines.flow.combine(peersState, beacon.peers) { n, b -> n + b.filter { p -> n.none { it.serviceName == p.serviceName } } }.collect { merged.value = it }
+        }
+    }
     private val lock = Any()
     private val queue = ArrayDeque<NsdServiceInfo>()
     private var resolving = false
@@ -156,7 +166,10 @@ class NsdLanDiscovery(context: Context) : LanDiscovery {
             override fun onStartDiscoveryFailed(t: String, code: Int) { SLog.w(TAG, "discovery failed: $code") }
             override fun onStopDiscoveryFailed(t: String, code: Int) {}
             override fun onServiceFound(i: NsdServiceInfo) {
-                if (i.serviceType != SERVICE_TYPE || i.serviceName == ownName) return
+                // Phone gate finding: the framework (mdnsd on these phones) reports the type with or without the
+                // trailing dot, and a leading one on some builds; compare the bare type or every find is dropped.
+                if (i.serviceType.trim('.') != SERVICE_TYPE.trim('.') || i.serviceName == ownName) return
+                SLog.d(TAG, "found ${i.serviceName}")
                 synchronized(lock) { queue.addLast(i) }
                 resolveNext()
             }
@@ -171,6 +184,7 @@ class NsdLanDiscovery(context: Context) : LanDiscovery {
         } catch (e: Exception) {
             SLog.w(TAG, "start: $e")
         }
+        beacon.start(serviceName, port)
     }
 
     private fun resolveNext() {
@@ -202,6 +216,7 @@ class NsdLanDiscovery(context: Context) : LanDiscovery {
         val (reg, disc) = synchronized(lock) { (registration to discovery).also { registration = null; discovery = null; queue.clear(); resolving = false } }
         try { reg?.let { nsd.unregisterService(it) } } catch (_: Exception) {}
         try { disc?.let { nsd.stopServiceDiscovery(it) } } catch (_: Exception) {}
+        beacon.stop()
         peersState.value = emptyList()
     }
 }

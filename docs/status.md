@@ -46,4 +46,4 @@ Without `mesh`, the node runs over an in-process loopback transport, so split jo
 - A split job started from a recipe has no CLOUD option (recipes run on the phones); the gate still re-runs a failed chunk in the cloud.
 - Document ingest (`PdfExtractor` has its OCR now, but nothing feeds it), voice and the share sheet remain out, as in phase 0.
 - The hardening flag has no wiring of its own; the soak harness is the JVM `SoakTest` (four seeded chaos sequences over the LAN and relay rigs); the 1-hour on-phone soak has not run.
-- None of this has run on a phone yet: every gate of spec section 19 still needs its on-phone pass; the JVM suites are the evidence so far.
+- First on-phone pass done (docs/gates.md): install, model load, discovery, pairing of three phones and the roster work on real iQOO 15s; BENCH, the OCR job and the gates from 4 on are still unrun.

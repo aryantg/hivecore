@@ -201,7 +201,20 @@ class MeshRouter(
     // ------------------------------------------------------------------ lifecycle
 
     /** Starts the selected transport and its collectors; returns once the collectors are subscribed. */
-    suspend fun start() = selectTransport(transportState.value)
+    suspend fun start() {
+        rosterStore?.latest()?.let { pinFromRoster(it) }   // members learned before this build ran, or while the app was off
+        selectTransport(transportState.value)
+    }
+
+    /** Spec 6.4: every member of an accepted roster is pinned, so phones that paired only with the admin accept each other. */
+    private fun pinFromRoster(after: RosterBody) {
+        for (m in after.members) {
+            if (m.nodeId == nodeId || m.nodeId in after.revoked || peerStore.isPinned(m.nodeId)) continue
+            if (Wire.nodeIdOf(m.pubkey) != m.nodeId) { SLog.w(TAG, "roster member ${m.nodeId.take(8)}: key does not match its id; not pinned"); continue }
+            peerStore.pin(m.nodeId, m.name, m.pubkey, null, emptyList(), now())
+            SLog.d(TAG, "pinned ${m.name} (${m.nodeId.take(8)}) from roster ${after.groupId} v${after.version}")
+        }
+    }
 
     suspend fun stop() {
         val ts: List<Transport>
@@ -628,6 +641,8 @@ class MeshRouter(
             if (id == nodeId) { SLog.w(TAG, "this phone was revoked from $groupId v${after.version}"); continue }
             if (peerStore.isPinned(id)) { SLog.w(TAG, "revoked ${peerStore.get(id)?.name ?: id.take(8)}: key deleted"); forget(id) }
         }
+        // Phone gate finding: two phones that each paired with the admin refused each other as "not paired".
+        pinFromRoster(after)
         scope.launch {
             val bytes = Wire.encode(type, nodeId, body, signer)
             for ((id, ep) in connectedNodes()) if (id != from) transportFor(ep)?.send(ep, bytes)

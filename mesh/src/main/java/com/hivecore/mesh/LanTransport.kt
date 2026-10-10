@@ -191,11 +191,25 @@ class LanTransport(
         return Link(kind, kbps, rttMs.toInt(), metered = false)
     }
 
-    /** Closes every link to [endpoint] (the session layer refused its handshake, or the router closed it). */
+    /**
+     * Closes every link to [endpoint] (the session layer refused its handshake, or the router closed it) and holds
+     * off redialling it for [backoffMaxMs]: phone gate finding, an unpaired neighbour redialled every second had each
+     * refusal close every link to it, including the one a pairing handshake was crossing on. [dialNow] lifts the hold.
+     */
     override fun disconnect(endpoint: PeerEndpoint) {
         val drop = synchronized(lock) { links.values.filter { it.peer?.endpointId == endpoint.endpointId } }
         drop.forEach { removeLink(it) }
-        SLog.d(TAG, "closed ${drop.size} link(s) to ${endpoint.displayName} (${endpoint.endpointId})")
+        synchronized(lock) { backoff[endpoint.endpointId] = backoffMaxMs; nextAttempt[endpoint.endpointId] = now() + backoffMaxMs }   // after removeLink's own 1 s retry
+        SLog.d(TAG, "closed ${drop.size} link(s) to ${endpoint.displayName} (${endpoint.endpointId}); redial in ${backoffMaxMs / 1000} s")
+    }
+
+    /** Dials every discovered peer whose node id starts with [prefix] at once (a pairing is starting with it), hold or not. */
+    fun dialNow(prefix: String) {
+        synchronized(lock) {
+            val ids = discovery.peers.value.filter { prefixOf(it.serviceName) == prefix.take(8) }.map { endpointId(it.serviceName, it.host) }
+            for (id in ids) { nextAttempt.remove(id); backoff.remove(id); firstSeen[id] = 0L }
+        }
+        wake.trySend(Unit)
     }
 
     // ---- server side -------------------------------------------------------------------------------------------

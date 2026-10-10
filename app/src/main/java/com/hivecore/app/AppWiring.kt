@@ -348,11 +348,16 @@ object AppWiring {
         } else null
         pairing = PairingImpl(router, signer, peerStore, selfName, locate = { inviter, _ ->
             val l = lan ?: return@PairingImpl null
+            // Phone gate finding: a link left half-open by the unpaired churn swallows the handshake, so every link to
+            // the inviter is dropped and a fresh one dialled before the INIT goes out (discovery and TCP take seconds).
+            l.connected.value.filter { it.endpointId.startsWith(inviter.take(8)) }.forEach { l.disconnect(it) }
+            l.dialNow(inviter)
             var ep: PeerEndpoint? = null
-            for (i in 0 until 16) {   // discovery and the TCP link take a few seconds
+            for (i in 1..16) {
+                delay(500)
                 ep = l.connected.value.firstOrNull { it.endpointId.startsWith(inviter.take(8)) }
                 if (ep != null) break
-                delay(500)
+                if (i % 4 == 0) l.dialNow(inviter)
             }
             ep
         }, scope = scope, clock = clock, remote = remoteLeg, guestSecure = { guestSecure[it] })
@@ -515,7 +520,16 @@ object AppWiring {
         // socket, an always-on transport of the router) running while the owner opted in ----
         val wifi = runCatching { app.getSystemService(WifiManager::class.java) }.getOrNull()
         val routerUp = MutableStateFlow(false)
-        suspend fun startRouter() { if (routerUp.value) return; runCatching { router.start(); routerUp.value = true }.onFailure { warn("mesh start failed: ${it.message}") } }
+        // mDNS replies are multicast and the Wi-Fi driver drops them unless an app holds the multicast lock (phone
+        // gate finding: without it a phone registers but never finds the others), so the lock is held from the
+        // moment the LAN transport runs, not only while the worker service is on.
+        var discoveryLock: WifiManager.MulticastLock? = null
+        suspend fun startRouter() {
+            if (routerUp.value) return
+            if (Features.meshTrust && discoveryLock == null)
+                discoveryLock = runCatching { wifi?.createMulticastLock("hivecore-discovery")?.apply { setReferenceCounted(false); acquire() } }.getOrNull()
+            runCatching { router.start(); routerUp.value = true }.onFailure { warn("mesh start failed: ${it.message}") }
+        }
         WorkerService.keepalive = object : WorkerService.Keepalive {
             private var lock: WifiManager.MulticastLock? = null
             override fun start() {

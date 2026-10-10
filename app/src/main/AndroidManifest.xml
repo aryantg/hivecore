@@ -20,6 +20,10 @@
     <!-- QR pairing, released photos -->
     <uses-permission android:name="android.permission.CAMERA" />
 
+    <!-- The shared model root Download/HiveCoreModels (spec 4.3) is outside scoped storage on Android 11+; the
+         owner grants "All files access" once (Settings screen) or the bundles go under Android/data/com.hivecore/files/models -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
+
     <!-- Plan consent over the lock screen, fingerprint signing -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
