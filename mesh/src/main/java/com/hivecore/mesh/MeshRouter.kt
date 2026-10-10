@@ -151,6 +151,9 @@ class MeshRouter(
     /** The session layer of transport [name] (default: the selected one); pairing and the roster admin talk to it. */
     fun secure(name: String = transportState.value): SecureTransport? = transports[name]
 
+    /** Every transport's session layer (pairing installs its admission rule on each). */
+    fun secureTransports(): Collection<SecureTransport> = transports.values
+
     /** Registers [l] on every transport's session layer (pairing listens for CONTROL frames). */
     fun addSessionListener(l: SessionListener) = transports.values.forEach { it.addListener(l) }
 
