@@ -79,8 +79,14 @@ data class SplitPlan(
     fun expectedMs(c: Chunk, node: String): Double = c.units * (unitMs[node] ?: defaultUnitMs)
 
     /** The map task of [c] (params = job params overlaid with the chunk's slice). */
-    fun task(c: Chunk, id: String = "c${c.index}"): TaskSpec = TaskSpec(id, job.op, JsonObject(job.params + c.params),
+    fun task(c: Chunk, id: String = "c${c.index}"): TaskSpec = TaskSpec(id, job.op, JsonObject(job.params + c.params + (ChunkPlanner.CHUNK_ID_PARAM to JsonPrimitive(c.chunkId))),
         owner = if (c.private) owner else null, modelId = job.modelId, blobs = c.blobs)
+
+    /**
+     * The PLAN template of this job (spec 16.3, P10): one TaskSpec per op carrying the job params only, so every chunk
+     * TASK instantiates it (same op and model, every template param unchanged) and nodes authorise chunks against it.
+     */
+    fun template(): TaskSpec = TaskSpec("split", job.op, job.params, modelId = job.modelId)
 
     /** Expected time of the whole job on [node] alone (the speed-up baseline). */
     fun singlePhoneMs(node: String): Double = chunks.sumOf { expectedMs(it, node) }
@@ -195,6 +201,8 @@ class ChunkPlanner(private val targetMs: Double = SplitConstants.TARGET_CHUNK_MS
 
     companion object {
         const val PATTERNS_VERSION = "split-1"
+        /** `TaskSpec.params` key of the chunk id a chunk TASK carries: the memo key on every phone (spec 13.2, 13.3). */
+        const val CHUNK_ID_PARAM = "chunkId"
         const val DEFAULT_TREE_SENTENCES = SplitConstants.TREE_SENTENCES
         const val MAX_AUDIO_S = SplitConstants.MAX_AUDIO_S
 

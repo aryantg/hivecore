@@ -28,6 +28,7 @@ import com.hivecore.mesh.MeshJson
 import com.hivecore.mesh.ModelFailBody
 import com.hivecore.mesh.ModelReadyBody
 import com.hivecore.mesh.MsgType
+import com.hivecore.mesh.PlanBody
 import com.hivecore.mesh.TaskBody
 import com.hivecore.mesh.TaskResultBody
 import com.hivecore.mesh.TaskSignalBody
@@ -60,6 +61,10 @@ import java.util.concurrent.atomic.AtomicLong
  * failures and low-confidence votes (12.1, 15.1); [schema] validates outputs against `params.schema`; [readyFor]
  * is placement's MODEL_READY set per capability (10.5); [onCooldown] reports the 10-minute (node, capability)
  * cooldown an oom / model_load / thermal result starts (14).
+ *
+ * P10 (spec 6.5, 16.3): before a phone's first TASK of a run it gets a PLAN whose dag holds the job's one template
+ * (`SplitPlan.template`) and whose `chunkIds` list every task id the run may send (chunk × attempt); a re-cut that adds
+ * chunks re-sends it. Nodes drop chunk TASKs that instantiate no held PLAN.
  */
 class SplitCommander(
     private val selfId: String,
@@ -136,9 +141,12 @@ class SplitCommander(
     /**
      * Runs [job] to completion; emits the chunk grid as it changes; the last emission has `done` (complete, or
      * `partial` with a reason) or `error` (cancelled, could not plan, merge failed). [ready] overrides [readyFor] for
-     * this run (the phones placement reported MODEL_READY).
+     * this run (the phones placement reported MODEL_READY). A resume (13.3) passes the outputs it already holds
+     * (journaled and reclaimed) as [prefilled] (chunkId -> output) so only the missing chunks run, and [planRun]
+     * continues the journaled `jobId#run` numbering so the resumed attempts are new task ids on every phone.
      */
-    fun run(job: SplitJob, useMemo: Boolean = true, ready: Set<String>? = null): Flow<SplitProgress> = channelFlow {
+    fun run(job: SplitJob, useMemo: Boolean = true, ready: Set<String>? = null, prefilled: Map<String, JsonElement> = emptyMap(),
+            planRun: Long? = null): Flow<SplitProgress> = channelFlow {
         val t0 = clock()
         val cap = job.cap
         val profs = profiles().filter { !cooled(it.nodeId, cap, t0) }
@@ -152,7 +160,7 @@ class SplitCommander(
         val q = WorkQueue(plan, plan.eligible, clock, comparator, slots = slots,
             warm = { n -> job.modelId != null && snapshot[n]?.warm?.contains(job.modelId) == true },
             linkOf = { n -> links[n] ?: Link.UNKNOWN }, allowMobileData = allowMobileData(), replicas = plan.replicas)
-        val planId = "${job.jobId}#${seq.incrementAndGet()}"
+        val planId = "${job.jobId}#${planRun ?: seq.incrementAndGet()}"
         val journaled = journal !== JobJournal.None
         val privacy = when {
             plan.chunks.all { it.private } -> Lineage.PRIVATE
@@ -170,8 +178,13 @@ class SplitCommander(
         var journaledChunks = 0
         fun journalNewChunks() { while (journaledChunks < q.chunkCount) { journal.chunk(chunkRow(q.chunkAt(journaledChunks)!!, "queued", 0)); journaledChunks++ } }
         journalNewChunks()
+        // 13.3: a resume brings the outputs the journal and the swarm's memos already hold (their output rows are journaled).
+        plan.chunks.forEach { c ->
+            prefilled[c.chunkId]?.let { out -> q.prefill(c.index, out); journal.chunk(chunkRow(c, "done", 0)) }
+        }
         // 13.2: memo hits are pre-filled before dispatch.
         if (useMemo) plan.chunks.forEach { c ->
+            if (c.chunkId in prefilled) return@forEach
             memo.get(c.chunkId)?.let { hit ->
                 q.prefill(c.index, hit.outputJson)
                 journal.output(OutputRow(job.jobId, c.chunkId, hit.outputHash, hit.outputJson, "memo"))
@@ -183,7 +196,17 @@ class SplitCommander(
         val blobsAt = HashSet<String>()     // "node|blob" already shipped
         val outages = HashMap<String, Int>()
         val stepCloud = ArrayList<String>()
+        val planned = HashMap<String, Int>()  // node -> chunk count the PLAN it holds covers (P10)
         try {
+            /** P10: the PLAN a phone authorises this run's chunk TASKs against; sent before its first TASK and after a re-cut. */
+            suspend fun ensurePlanned(node: String) {
+                if (node == selfId || planned[node] == q.chunkCount) return
+                val ids = (0 until q.chunkCount).flatMap { i -> (1..SplitConstants.MAX_ATTEMPTS).map { a -> WorkQueue.taskId(i, a) } }
+                val dag = com.hivecore.core.Dag("split", ChunkPlanner.PATTERNS_VERSION, listOf(plan.template()), "split")
+                val body = PlanBody(planId, planHash, selfId, "split ${job.op.name.lowercase()}", dag, emptyMap(), clock(), UUID.randomUUID().toString(), ids)
+                transmit(node, MsgType.PLAN, MeshJson.encode(body)).onSuccess { planned[node] = q.chunkCount }
+                    .onFailure { SLog.w(TAG, "PLAN $planId to ${node.take(8)} not sent: ${it.message}") }
+            }
             suspend fun cancel(a: WorkQueue.Attempt, why: String) {
                 transmit(a.node, MsgType.TASK_CANCEL, MeshJson.encode(TaskSignalBody(planId, WorkQueue.taskId(a.chunk, a.no), selfId, why)))
             }
@@ -211,6 +234,7 @@ class SplitCommander(
                         }
                     }
                 }
+                if (remote) ensurePlanned(a.node)
                 val now = clock()
                 journal.attempt(AttemptRow(job.jobId, c.chunkId, a.attempt, a.node, now, now + a.deadlineMs, if (a.duplicate) "duplicate" else "sent"))
                 journal.chunk(chunkRow(c, "running", a.attempt))

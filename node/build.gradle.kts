@@ -39,6 +39,7 @@ dependencies {
     implementation(libs.mlkit.text.recognition)
     implementation(libs.pdfbox.android)
     testImplementation(project(":planner"))
+    testImplementation(project(":trust"))
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.sqlite.jdbc)

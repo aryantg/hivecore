@@ -469,7 +469,7 @@ class SplitMeshTest {
         assertTrue(m.a.swarm.split!!.cooldowns().isEmpty())
         assertTrue(p.nodes.any { it.node == m.b.nodeId })                   // still a member of the job
         assertTrue(p.notes.none { it.contains("failed") })
-        m.b.runner.resumeWorkers()
+        m.b.baseRunner.resumeWorkers()
         val again = run(m, j.copy(jobId = "emb2")).last()
         assertTrue(again.done)
         assertTrue(m.exec.getValue("sales").chunks > 0)
