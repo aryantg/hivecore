@@ -58,6 +58,22 @@ class WorkerPolicyImplTest {
         assertTrue(r.ticks >= 4)
     }
 
+    @Test fun aYieldingPhoneDoesNotAdvertiseEligible() = runTest {
+        var yielding = true
+        val r = Rig(this)
+        val policy = WorkerPolicyImpl("node-y", r.device, r.presence, r.engine, r.prefs, r.queue, backgroundScope,
+            clock = { testScheduler.currentTime }, yielding = { yielding })
+        policy.setOptIn(true)
+        r.device.chargingState.value = true        // charging, app in the background: idle with the screen on
+        runCurrent()
+        assertTrue(policy.profile.value.idle)
+        assertFalse(policy.profile.value.eligible)
+        assertFalse(policy.profile.value.heavyOk)
+        yielding = false
+        policy.recompute()
+        assertTrue(policy.profile.value.eligible)
+    }
+
     @Test fun inputsFlowIntoProfile() = runTest {
         val r = Rig(this)
         r.policy.setOptIn(true)

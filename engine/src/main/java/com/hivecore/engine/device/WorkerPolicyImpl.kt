@@ -61,6 +61,12 @@ class WorkerPolicyImpl(
     private val bench: () -> Map<String, Double> = { emptyMap() },
     /** Model ids installed outside the registry (the GenieX LLM builds); the registry's ids are added. */
     private val extraInstalled: () -> Set<String> = { emptySet() },
+    /**
+     * True while the task runner yields to the owner (OwnerYield: until the screen has been off for 60 s). Phone gate
+     * finding: a charging phone with the app in the background counted as idle with its screen on, so it advertised
+     * eligible while refusing every task, and each refusal cost the orchestrator a full photo transfer.
+     */
+    private val yielding: () -> Boolean = { false },
 ) : WorkerPolicy {
 
     private val optInState = MutableStateFlow(prefs.getBoolean(PREF_WORKER_OPT_IN, false))
@@ -137,8 +143,8 @@ class WorkerPolicyImpl(
             thermal = s.thermal,
             inCall = s.inCall,
             workerOptIn = s.optIn,
-            eligible = eligible(s),
-            heavyOk = heavyOk(s, dutyCycle),
+            eligible = eligible(s) && !yielding(),
+            heavyOk = heavyOk(s, dutyCycle) && !yielding(),
             queueDepth = queueDepth.value,
             big = pool?.big?.value ?: if (backend != null) "llm" else "none",
             warm = (pool as? CapabilityPool)?.warm()?.sorted() ?: pool?.warm?.value ?: emptyList(),

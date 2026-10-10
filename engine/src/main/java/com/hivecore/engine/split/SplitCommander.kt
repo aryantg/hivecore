@@ -33,6 +33,8 @@ import com.hivecore.mesh.TaskBody
 import com.hivecore.mesh.TaskResultBody
 import com.hivecore.mesh.TaskSignalBody
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
@@ -251,6 +253,7 @@ class SplitCommander(
                     return
                 }
                 if (remote) ensurePlanned(a.node)
+                q.sent(a.node, c.index, a.attempt)
                 val now = clock()
                 journal.attempt(AttemptRow(job.jobId, c.chunkId, a.attempt, a.node, now, now + a.deadlineMs, if (a.duplicate) "duplicate" else "sent"))
                 journal.chunk(chunkRow(c, "running", a.attempt))
@@ -352,14 +355,34 @@ class SplitCommander(
                 }
             }
 
+            /**
+             * Phone gate finding: each dispatch waited for its own photo transfer, so this phone's slot and the other
+             * workers idled behind the slowest transfer. Local and blob-free assignments go first; the remote ones'
+             * blobs are sent in parallel, then each is dispatched as before (queue state stays on this coroutine).
+             */
+            suspend fun dispatchAll(batch: List<WorkQueue.Assignment>) {
+                val (now, shipping) = batch.partition { it.node == selfId || it.chunk.blobs.isEmpty() }
+                now.forEach { dispatch(it) }
+                if (shipping.size > 1) {
+                    val sent = kotlinx.coroutines.coroutineScope {
+                        shipping.map { a ->
+                            val missing = a.chunk.blobs.filter { "${a.node}|$it" !in blobsAt }
+                            async { Triple(a, missing, if (missing.isEmpty()) Result.success(0L) else sendBlobs(a.node, missing, job.jobId)) }
+                        }.awaitAll()
+                    }
+                    for ((a, missing, r) in sent) r.onSuccess { b -> if (missing.isNotEmpty()) q.addBytes(b); missing.forEach { blobsAt += "${a.node}|$it" } }
+                }
+                shipping.forEach { dispatch(it) }        // a failed parallel send is retried (and handled) in dispatch
+            }
+
             while (true) {
-                for (a in q.fill()) dispatch(a)
+                dispatchAll(q.fill())
                 afterEvent()
                 if (q.finished) break
                 send(q.progress.value.copy(resumable = journaled, elapsedMs = clock() - t0))
                 val wake = q.nextWake()
                 if (wake == null && q.running().isEmpty()) {
-                    if (q.fill().also { re -> re.forEach { dispatch(it) } }.isNotEmpty()) continue
+                    if (q.fill().also { re -> dispatchAll(re) }.isNotEmpty()) continue
                     q.failStranded()
                     continue
                 }
