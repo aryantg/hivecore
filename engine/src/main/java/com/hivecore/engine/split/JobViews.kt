@@ -27,7 +27,7 @@ object JobViews {
                     ChunkStatus.FAILED -> ChunkState.FAILED
                 }, c.nodes.firstOrNull()?.let { n -> if (n == "memo" || n == "recut" || n.startsWith("cloud:")) n else nameOf(n) },
                     c.ms.takeIf { c.status == ChunkStatus.DONE }, c.label,
-                    duplicated = c.duplicated, recut = c.recut || c.recutOf != null, recutOf = c.recutOf, verified = c.verified, cloud = c.cloud)
+                    duplicated = c.duplicated, recut = c.recut || c.recutOf != null, recutOf = c.recutOf, verified = c.verified, cloud = c.cloud, verdict = c.verdict)
             },
             nodes = p.nodes.map { n -> NodeLoad(n.node, nameOf(n.node), n.chunks, n.busyMs, Math.round(n.units / elapsedS * 100.0) / 100.0, link = n.link) },
             bytesMoved = p.bytesMoved,

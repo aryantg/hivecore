@@ -10,6 +10,8 @@ import com.hivecore.core.SLog
 import com.hivecore.core.TaskRunner
 import com.hivecore.core.TaskSpec
 import com.hivecore.engine.ComparatorImpl
+import com.hivecore.engine.decide.ChunkDecisions
+import com.hivecore.engine.journal.DecisionRow
 import com.hivecore.engine.EscalationRequest
 import com.hivecore.engine.EscalationTrigger
 import com.hivecore.engine.Escalator
@@ -96,12 +98,16 @@ class SplitCommander(
     private val ensureAwake: suspend (nodeId: String) -> Boolean = { true },
     /** section 13.4: the deputy this run streams its journal to (recorded in the job row so a resume knows whom to ask); null = none */
     private val deputy: () -> String? = { null },
+    /** the decision model's chunking points (docs/plans/decision-chunking.md); null = the deterministic cutters only */
+    private val decisions: ChunkDecisions? = null,
 ) {
     private sealed interface Event {
         data class Result(val node: String, val body: TaskResultBody) : Event
         data class Yield(val node: String, val taskId: String, val reason: String) : Event
         data class ModelReady(val node: String) : Event
         data class ModelFail(val node: String, val errorClass: String) : Event
+        /** decision point E, an annotation of an accepted output (judged off the loop) */
+        data class Verdict(val index: Int, val p: Double, val rows: List<DecisionRow>) : Event
         data object Cancel : Event
     }
 
@@ -152,21 +158,43 @@ class SplitCommander(
      * (journaled and reclaimed) as [prefilled] (chunkId -> output) so only the missing chunks run, and [planRun]
      * continues the journaled `jobId#run` numbering so the resumed attempts are new task ids on every phone.
      */
-    fun run(job: SplitJob, useMemo: Boolean = true, ready: Set<String>? = null, prefilled: Map<String, JsonElement> = emptyMap(),
+    fun run(job0: SplitJob, useMemo: Boolean = true, ready: Set<String>? = null, prefilled: Map<String, JsonElement> = emptyMap(),
             planRun: Long? = null): Flow<SplitProgress> = channelFlow {
         val t0 = clock()
+        var job = job0
         val cap = job.cap
         val profs = profiles().filter { !cooled(it.nodeId, cap, t0) }
         val readySet = (ready ?: cap?.let { readyFor(it) })?.filter { !cooled(it, cap, t0) }?.toSet()
-        val plan = planner.plan(job, profs, selfId, readySet, unitMsOf).getOrElse { e ->
+        var plan = planner.plan(job, profs, selfId, readySet, unitMsOf).getOrElse { e ->
             send(failed(job, e.message ?: "cannot plan the split", t0)); return@channelFlow
+        }
+        // Decision points A and B (docs/plans/decision-chunking.md §5): on the orchestrator, once, before anything is
+        // dispatched. The decided job (cuts, decider) is what every job row below journals, so a resume re-plans it
+        // identically without the model; any failure keeps the deterministic plan.
+        val decisionRows = ArrayList<DecisionRow>()
+        val decisionNotes = ArrayList<String>()
+        val dm = decisions?.takeIf { it.build() != null && job.cuts == null && job.decider == null }
+        if (dm != null) {
+            send(SplitProgress(job.jobId, job.op.name, plan.kind.name, plan.axis.name, emptyList(), emptyList(), 0, 0, 0.0, 0.0, 0.0, 0, 0, 0,
+                done = false, notes = listOf("deciding chunk boundaries and difficulty")))
+            val before = dm.notes.size
+            try {
+                dm.decideCut(job, plan)?.let { o ->
+                    planner.plan(o.value, profs, selfId, readySet, unitMsOf).onSuccess { p -> job = o.value; plan = p; decisionRows += o.rows }
+                        .onFailure { SLog.w(TAG, "decided cut of ${job.jobId} did not plan: ${it.message}; fixed cut kept") }
+                }
+                dm.decideDifficulty(job, plan)?.let { o -> plan = o.value; decisionRows += o.rows }
+            } catch (e: Exception) { SLog.w(TAG, "decisions for ${job.jobId} failed: ${e.message}; deterministic plan kept") }
+            decisionNotes += dm.notes.subList(before, dm.notes.size)
         }
         val snapshot = profs.associateBy { it.nodeId }
         val links = plan.eligible.associateWith { n -> if (n == selfId) Link.defaultFor(LinkKind.LAN) else WorkQueue.linkFrom(snapshot[n]) }
         fun isWan(n: String) = (links[n]?.kind ?: LinkKind.LAN).let { it == LinkKind.WAN_DIRECT || it == LinkKind.WAN_RELAY }
         val q = WorkQueue(plan, plan.eligible, clock, comparator, slots = slots,
             warm = { n -> job.modelId != null && snapshot[n]?.warm?.contains(job.modelId) == true },
-            linkOf = { n -> links[n] ?: Link.UNKNOWN }, allowMobileData = allowMobileData(), replicas = plan.replicas)
+            linkOf = { n -> links[n] ?: Link.UNKNOWN }, allowMobileData = allowMobileData(), replicas = plan.replicas,
+            verdictEnabled = dm != null)
+        q.notes += decisionNotes
         val planId = "${job.jobId}#${planRun ?: seq.incrementAndGet()}"
         val journaled = journal !== JobJournal.None
         val privacy = when {
@@ -181,9 +209,10 @@ class SplitCommander(
             capsSnapshot = deputyId?.let { d -> kotlinx.serialization.json.buildJsonObject { put("deputy", kotlinx.serialization.json.JsonPrimitive(d)) } },
             spec = Canon.json.encodeToJsonElement(SplitJob.serializer(), job))
         fun chunkRow(c: Chunk, state: String, attempts: Int) = ChunkRow(job.jobId, c.chunkId, c.index, c.params, if (c.private) plan.owner else null,
-            state, attempts, c.recutOf?.let { q.chunkAt(it)?.chunkId }, c.units)
-        // 13.1 write-ahead: the job and every chunk are journaled before the first TASK goes out.
+            state, attempts, c.recutOf?.let { q.chunkAt(it)?.chunkId }, c.units, c.replicas, c.build)
+        // 13.1 write-ahead: the job, its decisions and every chunk are journaled before the first TASK goes out.
         journal.begin(jobRow(JobState.RUNNING))
+        if (decisionRows.isNotEmpty()) journal.decisions(decisionRows)
         var journaledChunks = 0
         fun journalNewChunks() { while (journaledChunks < q.chunkCount) { journal.chunk(chunkRow(q.chunkAt(journaledChunks)!!, "queued", 0)); journaledChunks++ } }
         journalNewChunks()
@@ -206,6 +235,7 @@ class SplitCommander(
         val outages = HashMap<String, Int>()
         val stepCloud = ArrayList<String>()
         val planned = HashMap<String, Int>()  // node -> chunk count the PLAN it holds covers (P10)
+        val judging = ArrayList<kotlinx.coroutines.Job>()
         try {
             /** P10: the PLAN a phone authorises this run's chunk TASKs against; sent before its first TASK and after a re-cut. */
             suspend fun ensurePlanned(node: String) {
@@ -271,6 +301,21 @@ class SplitCommander(
                 journal.output(OutputRow(job.jobId, c.chunkId, hash, out, "node:$node"))
                 journal.chunk(chunkRow(c, "done", 0))
                 if (useMemo && r.verified != false) memo.put(c.chunkId, hash, out)
+                // Decision point E, the annotation: an output no second phone confirmed is judged off the loop (never inline:
+                // a model call here would stall dispatch and deadlines); the verdict only annotates, never changes acceptance.
+                if (dm != null && r.verified != true) judging += launch {
+                    try { dm.annotate(job, plan, c, node, out)?.let { events.trySend(Event.Verdict(c.index, it.value, it.rows)) } }
+                    catch (e: Exception) { SLog.w(TAG, "verdict for chunk ${c.index}: ${e.message}") }
+                }
+            }
+            /** Decision point E, the tie-break: disagreeing replicas with no phone left; null keeps the verification-failure path. */
+            suspend fun resolveVerdicts() {
+                for (r in q.takeVerdictRequests()) {
+                    val c = q.chunkAt(r.index)
+                    val o = if (c != null && dm != null) try { dm.verdict(job, plan, c, r.candidates) } catch (e: Exception) { SLog.w(TAG, "verdict: ${e.message}"); null } else null
+                    if (o != null && o.rows.isNotEmpty()) journal.decisions(o.rows)
+                    q.verdict(r.index, o?.value)
+                }
             }
             suspend fun escalateChunk(vf: WorkQueue.VerificationFailure) {
                 val c = q.chunkAt(vf.index) ?: return
@@ -306,6 +351,7 @@ class SplitCommander(
                 for (p in q.takeAssembled()) q.chunkAt(p)?.let { pc -> q.output(p)?.let { po ->
                     journal.output(OutputRow(job.jobId, pc.chunkId, Canon.hash(po), po, "recut")); journal.chunk(chunkRow(pc, "done", 0))
                 } }
+                resolveVerdicts()
                 for (vf in q.takeVerificationFailures()) escalateChunk(vf)
                 cancelSuperseded()
             }
@@ -391,7 +437,14 @@ class SplitCommander(
                         send(q.snapshot().copy(error = "cancelled", elapsedMs = clock() - t0)); return@channelFlow
                     }
                     is Event.Result -> onResult(ev)
+                    is Event.Verdict -> { if (ev.rows.isNotEmpty()) journal.decisions(ev.rows); q.annotateVerdict(ev.index, ev.p) }
                 }
+            }
+            // Verdict annotations still in flight (bounded by the budget) land in the final view: wait, then drain them.
+            judging.forEach { runCatching { it.join() } }
+            while (true) {
+                val ev = events.tryReceive().getOrNull() ?: break
+                if (ev is Event.Verdict) { if (ev.rows.isNotEmpty()) journal.decisions(ev.rows); q.annotateVerdict(ev.index, ev.p) }
             }
             q.running().forEach { cancel(it, "job done") }
             // 13.1: the merge runs only after the state change is journaled.
@@ -429,6 +482,7 @@ class SplitCommander(
             send(snap.copy(done = true, result = result, resultHash = result?.let { Canon.hash(it) }, elapsedMs = clock() - t0,
                 partial = q.partial, partialReason = q.partialReason, cloud = (snap.cloud + stepCloud).distinct(), resumable = false))
         } finally {
+            judging.forEach { it.cancel() }
             synchronized(lock) { runs.remove(planId) }
             events.close()
         }

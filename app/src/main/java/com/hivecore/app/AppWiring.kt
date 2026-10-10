@@ -417,6 +417,9 @@ object AppWiring {
         val patterns = runCatching { Patterns.fromJson(app.assets.open(Patterns.ASSET_PATH).bufferedReader().readText()) }
             .getOrElse { warn("patterns: ${it.message}"); null }
         val chooser = ClosedChooserImpl(llm)
+        // Decision model at the chunking stage (docs/plans/decision-chunking.md): Phase 1 votes over the loaded LLM through the
+        // closed chooser; only with the runtime (the LLM) and the `decide` flag. Modules below :app see a null model as "off".
+        val decisionModel = if (Features.runtime && Features.decide) com.hivecore.runtime.decide.VotingDecisionModel.over(llm, chooser) { catalog } else null
         // OCR (spec 4.3 `ocr`, catalog `mlkit_text_latin`): ML Kit's bundled Latin recogniser, the document executors' seam
         val ocr: com.hivecore.core.Ocr? = if (Features.runtime) runCatching { com.hivecore.node.docai.MlKitOcr(app) }.getOrElse { warn("ocr: ${it.message}"); null } else null
         lateinit var graph: SwarmGraph
@@ -471,6 +474,7 @@ object AppWiring {
             deputy = if (Features.state) deputyOf else { { null } },
             ensureAwake = { id -> relayPresence?.let { p -> if (router.endpointOf(id)?.transport == RelayTransport.NAME) p.ensureAwake(id) else true } ?: true },
             wrapRunner = { r -> if (memo !== ChunkMemo.None) MemoizingTaskRunner(r, memo) else r },
+            decisionModel = decisionModel,
         )
         graph = SwarmGraph.build(deps)
         val node = graph.node

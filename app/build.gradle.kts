@@ -31,6 +31,7 @@ android {
         flag("FEATURE_STATE", "state")            // phase 7: journal, memo, RECLAIM, resume, ledger receipts
         flag("FEATURE_CLOUD", "cloud")            // phase 8: escalation gate, T2 planner (orchestrator only)
         flag("FEATURE_HARDENING", "hardening")    // phase 9: re-cut, deputy, store-and-forward, soak
+        flag("FEATURE_DECIDE", "decide")          // decision model at the chunking stage (docs/plans/decision-chunking.md)
     }
 
     buildTypes {

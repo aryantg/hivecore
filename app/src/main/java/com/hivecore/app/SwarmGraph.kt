@@ -179,6 +179,8 @@ class SwarmGraph(
         val wrapRunner: (TaskRunnerImpl) -> TaskRunner = { it },
         /** the deputy a split run streams its journal to (spec 13.4); null = none */
         val deputy: () -> String? = { null },
+        /** the decision model for the chunking points (`decide` flag, docs/plans/decision-chunking.md); null = off */
+        val decisionModel: com.hivecore.core.DecisionModel? = null,
     )
 
     /** What executor factories get: the chooser and the node's own pieces. */
@@ -205,7 +207,7 @@ class SwarmGraph(
                 decorateProfile = { p -> p.copy(dataVersion = d.dataVersion(), p50 = p.p50 + d.p50()) },
                 journal = d.journal, memo = d.memo, escalator = d.escalator, readyFor = d.readyFor, unitMsOf = d.unitMsOf,
                 allowMobileData = d.allowMobileData, onCooldown = d.onCooldown, linkOf = d.linkOf, journalPull = d.journalPull,
-                ensureAwake = d.ensureAwake, deputy = d.deputy,
+                ensureAwake = d.ensureAwake, deputy = d.deputy, decisionModel = d.decisionModel,
             )
             node.recipeDefs = { id -> d.recipeDefs().firstOrNull { it.id == id } }
             node.recipes = { id, v -> d.recipeDefs().firstOrNull { it.id == id && (v.isEmpty() || it.version == v) }?.toRecipe() }

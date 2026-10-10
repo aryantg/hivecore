@@ -71,6 +71,9 @@ object PlacementState { const val REQUESTED = "requested"; const val READY = "re
     val attempts: Int,
     val recutOf: String? = null,
     val units: Int = 1,
+    /** decision point B: the replicas the chunk was decided to run with (null = the plan's) and the build it named */
+    val replicas: Int? = null,
+    val build: String? = null,
 )
 
 /** `attempts`: written before the TASK is sent (outcome = "sent") and again on result or fault. */
@@ -126,6 +129,25 @@ object PlacementState { const val REQUESTED = "requested"; const val READY = "re
     val outcome: String = "ran",
 )
 
+/**
+ * `decisions` (docs/plans/decision-chunking.md §7): one row per question the decision model answered for a job, written
+ * before the decided cut, replicas or verdict are acted on. Append-only. [answerJson] is the typed answer, [probabilities]
+ * the per-option distribution; [modelSha256] and [calibrationVersion] name the build that answered.
+ */
+@Serializable data class DecisionRow(
+    val jobId: String,
+    /** "A.boundary" | "B.difficulty" | "E.verdict" (Templates) */
+    val point: String,
+    val questionId: String,
+    val requestHash: String,
+    val answerJson: JsonElement,
+    val probabilities: JsonElement,
+    val modelSha256: String,
+    val calibrationVersion: String,
+    val llmCalls: Int,
+    val ts: Long,
+)
+
 /** Everything the journal holds for one job, for resume (§13.3) and the ledger replay (§13.6). */
 data class JobSnapshot(
     val job: JobRow,
@@ -134,6 +156,7 @@ data class JobSnapshot(
     val outputs: List<OutputRow>,
     val placements: List<PlacementRow>,
     val escalations: List<EscalationRow>,
+    val decisions: List<DecisionRow> = emptyList(),
 )
 
 /**
@@ -150,6 +173,8 @@ interface JobJournal {
     fun output(row: OutputRow)
     fun placement(row: PlacementRow)
     fun escalation(row: EscalationRow)
+    /** The decision model's answers for a job, in one transaction, before they are acted on. Default: not kept. */
+    fun decisions(rows: List<DecisionRow>) {}
     /** Jobs in a [JobState.RESUMABLE] state, oldest first. */
     fun resumable(): List<JobRow>
     fun load(jobId: String): JobSnapshot?

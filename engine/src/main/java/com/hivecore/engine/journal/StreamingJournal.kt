@@ -44,6 +44,7 @@ class StreamingJournal(
     override fun output(row: OutputRow) { inner.output(row); signal(row.jobId) }
     override fun placement(row: PlacementRow) { inner.placement(row); signal(row.jobId) }
     override fun escalation(row: EscalationRow) { inner.escalation(row); signal(row.jobId) }
+    override fun decisions(rows: List<DecisionRow>) { inner.decisions(rows); rows.firstOrNull()?.let { signal(it.jobId) } }
 
     /** After a pull from the deputy: it already holds [jobId] (or every job when null) up to [highWater]. */
     fun markSent(deputyId: String, jobId: String?, highWater: Long) = synchronized(sent) {

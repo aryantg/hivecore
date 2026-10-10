@@ -34,7 +34,8 @@ interface ReplicatedJournal : JobJournal {
 object JournalRows {
     const val JOBS = "jobs"; const val CHUNKS = "chunks"; const val ATTEMPTS = "attempts"
     const val OUTPUTS = "outputs"; const val PLACEMENTS = "placements"; const val ESCALATIONS = "escalations"
-    val TABLES = listOf(JOBS, CHUNKS, ATTEMPTS, OUTPUTS, PLACEMENTS, ESCALATIONS)
+    const val DECISIONS = "decisions"
+    val TABLES = listOf(JOBS, CHUNKS, ATTEMPTS, OUTPUTS, PLACEMENTS, ESCALATIONS, DECISIONS)
 
     val json: Json = Json { encodeDefaults = true; ignoreUnknownKeys = true; explicitNulls = false }
 
@@ -94,6 +95,7 @@ class SqliteJobJournal(private val db: SqlDb) : ReplicatedJournal {
     @Synchronized override fun output(row: OutputRow) = write { seq -> putOutput(row, seq) }
     @Synchronized override fun placement(row: PlacementRow) = write { seq -> putPlacement(row, seq) }
     @Synchronized override fun escalation(row: EscalationRow) = write { seq -> putEscalation(row, seq) }
+    @Synchronized override fun decisions(rows: List<DecisionRow>) { if (rows.isNotEmpty()) db.tx { for (r in rows) putDecision(r, nextSeq()) } }
 
     /** Several rows in one transaction (the cut of a job: one `chunks` row per chunk), committed before returning. */
     @Synchronized
@@ -119,8 +121,8 @@ class SqliteJobJournal(private val db: SqlDb) : ReplicatedJournal {
         listOf(r.jobId, r.planId, r.planHash, r.plannerTier, r.mode, r.state, r.createdTs, r.updatedTs, r.privacy, enc(r.capsSnapshot), enc(r.spec), seq))
 
     private fun putChunk(r: ChunkRow, seq: Long) = db.exec(
-        "INSERT OR REPLACE INTO chunks(jobId, chunkId, \"index\", params, owner, state, attempts, recutOf, units, seq) VALUES (?,?,?,?,?,?,?,?,?,?)",
-        listOf(r.jobId, r.chunkId, r.index, enc(r.params), r.owner, r.state, r.attempts, r.recutOf, r.units, seq))
+        "INSERT OR REPLACE INTO chunks(jobId, chunkId, \"index\", params, owner, state, attempts, recutOf, units, replicas, build, seq) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        listOf(r.jobId, r.chunkId, r.index, enc(r.params), r.owner, r.state, r.attempts, r.recutOf, r.units, r.replicas, r.build, seq))
 
     private fun putAttempt(r: AttemptRow, seq: Long) = db.exec(
         "INSERT OR REPLACE INTO attempts(jobId, chunkId, attempt, nodeId, dispatchedTs, deadlineTs, outcome, outputHash, errorClass, seq) VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -137,6 +139,10 @@ class SqliteJobJournal(private val db: SqlDb) : ReplicatedJournal {
     private fun putEscalation(r: EscalationRow, seq: Long) = db.exec(
         "INSERT OR REPLACE INTO escalations(seq, jobId, stepId, \"trigger\", slug, bytesSent, tokensIn, tokensOut, costInr, ts, outcome) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         listOf(seq, r.jobId, r.stepId, r.trigger, r.slug, r.bytesSent, r.tokensIn, r.tokensOut, r.costInr, r.ts, r.outcome))
+
+    private fun putDecision(r: DecisionRow, seq: Long) = db.exec(
+        "INSERT OR REPLACE INTO decisions(seq, jobId, point, questionId, requestHash, answerJson, probabilities, modelSha256, calibrationVersion, llmCalls, ts) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        listOf(seq, r.jobId, r.point, r.questionId, r.requestHash, enc(r.answerJson), enc(r.probabilities), r.modelSha256, r.calibrationVersion, r.llmCalls, r.ts))
 
     // ------------------------------------------------------------------ reads
 
@@ -162,6 +168,7 @@ class SqliteJobJournal(private val db: SqlDb) : ReplicatedJournal {
             outputs = db.query("SELECT * FROM outputs WHERE jobId = ? ORDER BY seq", listOf(jobId)).map(::outputOf),
             placements = db.query("SELECT * FROM placements WHERE jobId = ? ORDER BY nodeId, capability", listOf(jobId)).map(::placementOf),
             escalations = db.query("SELECT * FROM escalations WHERE jobId = ? ORDER BY seq", listOf(jobId)).map(::escalationOf),
+            decisions = db.query("SELECT * FROM decisions WHERE jobId = ? ORDER BY seq", listOf(jobId)).map(::decisionOf),
         )
     }
 
@@ -229,6 +236,8 @@ class SqliteJobJournal(private val db: SqlDb) : ReplicatedJournal {
                 if (db.query("SELECT 1 FROM outputs WHERE seq = ?", listOf(seq)).isNotEmpty()) return false; putOutput(r, seq) }
             JournalRows.ESCALATIONS -> { val r = j.decodeFromJsonElement(EscalationRow.serializer(), el)
                 if (db.query("SELECT 1 FROM escalations WHERE seq = ?", listOf(seq)).isNotEmpty()) return false; putEscalation(r, seq) }
+            JournalRows.DECISIONS -> { val r = j.decodeFromJsonElement(DecisionRow.serializer(), el)
+                if (db.query("SELECT 1 FROM decisions WHERE seq = ?", listOf(seq)).isNotEmpty()) return false; putDecision(r, seq) }
             else -> return false
         }
         return true
@@ -242,6 +251,7 @@ class SqliteJobJournal(private val db: SqlDb) : ReplicatedJournal {
         JournalRows.ATTEMPTS -> attemptOf(r) to AttemptRow.serializer()
         JournalRows.OUTPUTS -> outputOf(r) to OutputRow.serializer()
         JournalRows.PLACEMENTS -> placementOf(r) to PlacementRow.serializer()
+        JournalRows.DECISIONS -> decisionOf(r) to DecisionRow.serializer()
         else -> escalationOf(r) to EscalationRow.serializer()
     }
 
@@ -249,7 +259,8 @@ class SqliteJobJournal(private val db: SqlDb) : ReplicatedJournal {
         l(r, "createdTs"), l(r, "updatedTs"), s(r, "privacy"), dec(r["capsSnapshot"]), dec(r["spec"]), (r["mode"] as String?) ?: JobMode.LOCAL)
 
     private fun chunkOf(r: Map<String, Any?>) = ChunkRow(s(r, "jobId"), s(r, "chunkId"), l(r, "index").toInt(), dec(r["params"]) ?: JsonNull,
-        r["owner"] as String?, s(r, "state"), l(r, "attempts").toInt(), r["recutOf"] as String?, (r["units"] as Number?)?.toInt() ?: 1)
+        r["owner"] as String?, s(r, "state"), l(r, "attempts").toInt(), r["recutOf"] as String?, (r["units"] as Number?)?.toInt() ?: 1,
+        (r["replicas"] as Number?)?.toInt(), r["build"] as String?)
 
     private fun attemptOf(r: Map<String, Any?>) = AttemptRow(s(r, "jobId"), s(r, "chunkId"), l(r, "attempt").toInt(), s(r, "nodeId"),
         l(r, "dispatchedTs"), l(r, "deadlineTs"), s(r, "outcome"), r["outputHash"] as String?, r["errorClass"] as String?)
@@ -261,6 +272,9 @@ class SqliteJobJournal(private val db: SqlDb) : ReplicatedJournal {
 
     private fun escalationOf(r: Map<String, Any?>) = EscalationRow(s(r, "jobId"), s(r, "stepId"), s(r, "trigger"), s(r, "slug"), l(r, "bytesSent"),
         l(r, "tokensIn").toInt(), l(r, "tokensOut").toInt(), (r["costInr"] as Number).toDouble(), l(r, "ts"), (r["outcome"] as String?) ?: "ran")
+
+    private fun decisionOf(r: Map<String, Any?>) = DecisionRow(s(r, "jobId"), s(r, "point"), s(r, "questionId"), s(r, "requestHash"),
+        dec(r["answerJson"]) ?: JsonNull, dec(r["probabilities"]) ?: JsonNull, s(r, "modelSha256"), s(r, "calibrationVersion"), l(r, "llmCalls").toInt(), l(r, "ts"))
 
     private fun s(r: Map<String, Any?>, k: String): String = r[k] as String
     private fun l(r: Map<String, Any?>, k: String): Long = (r[k] as Number).toLong()
@@ -295,7 +309,7 @@ class SqliteJobJournal(private val db: SqlDb) : ReplicatedJournal {
                 "privacy" to "TEXT NOT NULL", "capsSnapshot" to "TEXT", "spec" to "TEXT", "seq" to "INTEGER NOT NULL"),
             JournalRows.CHUNKS to listOf("jobId" to "TEXT NOT NULL", "chunkId" to "TEXT NOT NULL", "index" to "INTEGER NOT NULL",
                 "params" to "TEXT", "owner" to "TEXT", "state" to "TEXT NOT NULL", "attempts" to "INTEGER NOT NULL", "recutOf" to "TEXT",
-                "units" to "INTEGER NOT NULL DEFAULT 1", "seq" to "INTEGER NOT NULL"),
+                "units" to "INTEGER NOT NULL DEFAULT 1", "replicas" to "INTEGER", "build" to "TEXT", "seq" to "INTEGER NOT NULL"),
             JournalRows.ATTEMPTS to listOf("jobId" to "TEXT NOT NULL", "chunkId" to "TEXT NOT NULL", "attempt" to "INTEGER NOT NULL",
                 "nodeId" to "TEXT NOT NULL", "dispatchedTs" to "INTEGER NOT NULL", "deadlineTs" to "INTEGER NOT NULL", "outcome" to "TEXT NOT NULL",
                 "outputHash" to "TEXT", "errorClass" to "TEXT", "seq" to "INTEGER NOT NULL"),
@@ -306,6 +320,9 @@ class SqliteJobJournal(private val db: SqlDb) : ReplicatedJournal {
             JournalRows.ESCALATIONS to listOf("seq" to "INTEGER NOT NULL", "jobId" to "TEXT NOT NULL", "stepId" to "TEXT NOT NULL",
                 "trigger" to "TEXT NOT NULL", "slug" to "TEXT NOT NULL", "bytesSent" to "INTEGER NOT NULL", "tokensIn" to "INTEGER NOT NULL",
                 "tokensOut" to "INTEGER NOT NULL", "costInr" to "REAL NOT NULL", "ts" to "INTEGER NOT NULL", "outcome" to "TEXT NOT NULL DEFAULT 'ran'"),
+            JournalRows.DECISIONS to listOf("seq" to "INTEGER NOT NULL", "jobId" to "TEXT NOT NULL", "point" to "TEXT NOT NULL",
+                "questionId" to "TEXT NOT NULL", "requestHash" to "TEXT NOT NULL", "answerJson" to "TEXT NOT NULL", "probabilities" to "TEXT NOT NULL",
+                "modelSha256" to "TEXT NOT NULL", "calibrationVersion" to "TEXT NOT NULL", "llmCalls" to "INTEGER NOT NULL", "ts" to "INTEGER NOT NULL"),
         )
 
         val PRIMARY_KEYS: Map<String, List<String>> = mapOf(
@@ -315,6 +332,7 @@ class SqliteJobJournal(private val db: SqlDb) : ReplicatedJournal {
             JournalRows.OUTPUTS to listOf("seq"),
             JournalRows.PLACEMENTS to listOf("jobId", "nodeId", "capability"),
             JournalRows.ESCALATIONS to listOf("seq"),
+            JournalRows.DECISIONS to listOf("seq"),
         )
     }
 }
