@@ -9,3 +9,5 @@ local.properties
 *.hprof
 relayd/relayd
 relayd/*.exe
+/Core Engine Specification.md
+/Reference migration notes from Sovereign Nodes.md

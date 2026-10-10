@@ -38,6 +38,6 @@ Shared files no track edits: `core/**` (except `JsonSchema.kt`), `engine/SwarmNo
 
 - Build only through `tools/gradle.sh`; use focused `--tests` while iterating; run the module's full test task before each commit.
 - JVM tests over the fakes (`FakeTransport`, `FakeBus`, `FakeSigner`, `FakeLlmEngine`, MockWebServer) are required; no real network, no real keys, no real mailbox.
-- The strings `[author handle]`, `Claude` and `AI-generated` never appear in code, docs or commits; commit messages read as the author's own.
+- No attribution strings and no legacy product or vendor names appear in code, docs or commits; commit messages read as the author's own.
 - No dependency from any module below `:app` on `:cloud` (the build enforces it).
 - Commit on the track branch; never touch `main`.

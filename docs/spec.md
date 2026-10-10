@@ -2,7 +2,7 @@
 
 # Phone Swarm Core Engine — Specification
 
-Oct 10, 2026 · @author
+Oct 10, 2026
 
 A new Android app that turns a group of iQOO 15 phones, in one room or in different cities, into one AI system: any phone can take a request, plan it, tell the other phones which local model to load, cut the work into chunks, spread them over the phones, track every chunk, recover from any phone failing, and merge a verified answer, with a cloud model used only by the requesting phone and only when the local models cannot deliver.
 
