@@ -71,6 +71,10 @@ class DemoPortImpl(
     }
 
     override suspend fun setRoleAndSeed(role: NodeRole): Result<String> = runCatching {
+        if (store == null && prefs.getBoolean(DemoKeys.DEMO_MODE, false)) {
+            prefs.putString(DemoKeys.NODE_ROLE, role.name)
+            return@runCatching "Demo mode: this phone plays ${label(role)}; the scripted phones already hold their sample data"
+        }
         val s = store ?: error("the data store is not running on this build")
         prefs.putString(DemoKeys.NODE_ROLE, role.name)
         withContext(Dispatchers.IO) { s.seedNow(role) }
@@ -79,6 +83,7 @@ class DemoPortImpl(
     }
 
     override suspend fun seedAll(): Result<String> = runCatching {
+        if (store == null && prefs.getBoolean(DemoKeys.DEMO_MODE, false)) return@runCatching "Demo mode: the scripted phones already hold their sample data"
         val s = store ?: error("the data store is not running on this build")
         withContext(Dispatchers.IO) { NodeRole.entries.forEach { s.seedNow(it) } }
         afterSeed()

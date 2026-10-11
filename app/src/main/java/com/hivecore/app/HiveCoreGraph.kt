@@ -119,7 +119,8 @@ class HiveCoreGraph(
             val prefs = SharedPrefsKv(app)
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             SLog.d("Graph", "building the graph; features: ${Features.enabled().ifEmpty { listOf("none") }}")
-            val ports = try { AppWiring.build(app, prefs, scope) } catch (e: Exception) {
+            val demo = prefs.getBoolean(com.hivecore.ui.ports.DemoKeys.DEMO_MODE, false)
+            val ports = try { if (demo) com.hivecore.app.demo.DemoWiring.build(app, prefs, scope) else AppWiring.build(app, prefs, scope) } catch (e: Exception) {
                 SLog.e("Graph", "wiring failed; the screens run over the fakes", e)
                 fakePorts(Features.enabled())
             }
