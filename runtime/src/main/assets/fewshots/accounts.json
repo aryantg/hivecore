@@ -3,21 +3,53 @@
     "Few-shot examples for the Accounts node's intent prompt (plan section 8). Loaded by com.hivecore.llm.FewShots.",
     "Shape: {role, shots:[{question, answer}]}. answer is an IntentSet object: {intents:[{table, metric, column?, group_by?, filters?}]} or {not_relevant:true}.",
     "Each shot becomes a user turn (the question) and an assistant turn (the answer re-encoded compactly). Keep exactly three; mined rows are added at runtime by the evening close.",
-    "Shot 1 shows a month-name filter in the demo year 2026 (month = substr(date,1,7) is derived at import). Shot 2 shows a status filter with the value as stored."
+    "Kavira Pharmaceuticals tables (financials per fiscal_year and fiscal_quarter; receivables and stockists per branch). Shot 1 shows a fiscal-year filter with the value as stored; shot 2 an average over a branch."
   ],
   "role": "ACCOUNTS",
   "shots": [
     {
-      "question": "Total invoiced in October?",
-      "answer": {"intents": [{"table": "invoices", "metric": "sum", "column": "total", "filters": [{"column": "month", "op": "eq", "value": "2026-10"}]}]}
+      "question": "EBITDA in FY2026",
+      "answer": {
+        "intents": [
+          {
+            "table": "financials",
+            "metric": "sum",
+            "column": "ebitda",
+            "filters": [
+              {
+                "column": "fiscal_year",
+                "op": "eq",
+                "value": "FY2026"
+              }
+            ]
+          }
+        ]
+      }
     },
     {
-      "question": "How many unpaid invoices?",
-      "answer": {"intents": [{"table": "invoices", "metric": "count", "filters": [{"column": "status", "op": "eq", "value": "UNPAID"}]}]}
+      "question": "Average days to collect in Chennai",
+      "answer": {
+        "intents": [
+          {
+            "table": "receivables",
+            "metric": "avg",
+            "column": "dso_days",
+            "filters": [
+              {
+                "column": "branch",
+                "op": "eq",
+                "value": "CHN"
+              }
+            ]
+          }
+        ]
+      }
     },
     {
-      "question": "Average commission in the West",
-      "answer": {"not_relevant": true}
+      "question": "Average commission in Bengaluru",
+      "answer": {
+        "not_relevant": true
+      }
     }
   ]
 }

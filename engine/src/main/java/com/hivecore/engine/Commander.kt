@@ -26,6 +26,10 @@ import com.hivecore.core.SLog
 import com.hivecore.core.Scheduler
 import com.hivecore.core.TaskSpec
 import com.hivecore.core.Timing
+import com.hivecore.engine.deck.Deck
+import com.hivecore.engine.deck.DeckAssembler
+import com.hivecore.engine.picture.Picture
+import com.hivecore.engine.picture.PictureAssembler
 import com.hivecore.mesh.MeshJson
 import com.hivecore.mesh.MsgType
 import com.hivecore.mesh.PlanBody
@@ -99,6 +103,10 @@ class Commander(
     private val minDeadlineMs: Long = 4_000L,
     private val escalator: Escalator = Escalator.Off,
     private val schemaValidator: SchemaValidator = SchemaValidator.NONE,
+    /** where a deck plan's .pptx is written (null = the deck structure only, no file) */
+    private val deckDir: java.io.File? = null,
+    /** a generated picture by its sha256 (the blob store), for the deck step */
+    private val blobFile: (String) -> java.io.File? = { null },
 ) {
     // ------------------------------------------------------------------ inbound
 
@@ -289,8 +297,20 @@ class Commander(
         private fun reduce(t: TaskRun) {
             val inputs = t.spec.inputs.map { tasks.getValue(it).output!! }
             val t1 = clock()
-            val out = when (t.spec.op) {
-                Op.RENDER -> inputs.first()
+            val out = when {
+                // the deck step: the other phones' outputs become slides and a .pptx on this phone
+                DeckAssembler.isDeckStep(t.spec) -> try {
+                    DeckAssembler.assemble(t.spec, t.spec.inputs.map { id -> tasks.getValue(id).spec to tasks.getValue(id).output!! }, blobFile, deckDir).toJson()
+                } catch (e: Exception) {
+                    throw Failed(listOf(selfName to "the deck could not be assembled: ${e.message ?: e.javaClass.simpleName}"))
+                }
+                // the picture step: the generated PNG becomes the answer's picture (copied beside the decks)
+                PictureAssembler.isPictureStep(t.spec) -> try {
+                    PictureAssembler.assemble(t.spec, t.spec.inputs.map { id -> tasks.getValue(id).spec to tasks.getValue(id).output!! }, blobFile, deckDir).toJson()
+                } catch (e: Exception) {
+                    throw Failed(listOf(selfName to "the picture could not be assembled: ${e.message ?: e.javaClass.simpleName}"))
+                }
+                t.spec.op == Op.RENDER -> inputs.first()
                 else -> reducer.run(t.spec.op, t.spec.params, inputs).getOrElse {
                     throw Failed(listOf(selfName to "${t.spec.op} failed: ${it.message}"))
                 }
@@ -298,6 +318,13 @@ class Commander(
             Canon.notesOf(out).forEach { if (it !in notes) notes += it }
             t.output = out; t.executors = listOf(selfId); t.ms = clock() - t1; t.verified = true
         }
+
+        /**
+         * The step's `schema` against its result. `LLM_MAP` answers `{"items":[{item, output}]}` where the schema
+         * describes each `output` (spec 7.5), so every item is checked; any other op's result is checked whole.
+         * (First phone pass of the deck plan: checking the envelope refused every LLM_MAP with "missing title".)
+         */
+        private fun schemaCheck(spec: TaskSpec, out: JsonElement, schema: JsonObject): String? = schemaValidator.check(spec.op, out, schema)
 
         private fun isJudge(spec: TaskSpec) = spec.op == Op.VERIFY || spec.op == Op.EVAL
 
@@ -413,7 +440,7 @@ class Commander(
                     t.ms = maxOf(t.ms, b.ms)
                     if (t.spec.op == Op.AGG) invariants(t, node, out)
                     val schema = t.spec.params[SchemaValidator.PARAM] as? JsonObject
-                    val schemaWhy = if (schema != null) schemaValidator.validate(out, schema) else null
+                    val schemaWhy = if (schema != null) schemaCheck(t.spec, out, schema) else null
                     if (schemaWhy != null) { onSchemaFailure(t, node, schemaWhy); return }
                     if (!t.replicate) {
                         t.output = out; t.executors = listOf(node); t.verified = t.cls == OpClass.OWNER
@@ -665,13 +692,15 @@ class Commander(
                 text = text, tables = ownerTables, joined = finalTable, docAnswers = docs, chip = AnswerChip.PLAN,
                 provenance = provenance, timing = Timing(totalMs = clock() - t0), notes = notes.toList(),
                 rowsMoved = 0, rowsHeld = ownerTables.sumOf { it.rowsHeld }, approvals = approvals, phones = phones,
-                plan = PlanSummary(dag.patternId, dag.tasks.size, lines, tasks.values.count { it.verified }, confidence, planHash)
+                plan = PlanSummary(dag.patternId, dag.tasks.size, lines, tasks.values.count { it.verified }, confidence, planHash),
+                artifact = out.takeIf { Deck.isDeck(it) || Picture.isPicture(it) },
             )
         }
 
-        /** RENDER passes its input through: the sentence template is the one of the op that produced the value. */
+        /** RENDER passes its input through: the sentence template is the one of the op that produced the value (a deck or a picture is its own producer). */
         private fun producerOf(t: TaskRun): TaskRun =
-            if (t.spec.op == Op.RENDER && t.spec.inputs.isNotEmpty()) tasks[t.spec.inputs.first()]?.let { producerOf(it) } ?: t else t
+            if (t.spec.op == Op.RENDER && !DeckAssembler.isDeckStep(t.spec) && !PictureAssembler.isPictureStep(t.spec) && t.spec.inputs.isNotEmpty())
+                tasks[t.spec.inputs.first()]?.let { producerOf(it) } ?: t else t
 
         private fun provenance(): List<Provenance> {
             val out = ArrayList<Provenance>()
@@ -712,6 +741,8 @@ object PlanRenderer {
 
     fun render(producer: TaskSpec, out: JsonElement, inputs: List<AggTable>, notes: List<String>): String {
         val body = when {
+            Deck.isDeck(out) -> Deck.fromJson(out)?.let { d -> "${d.summary} Deck: ${d.slides.size} slides, \"${d.title}\"" + (if (d.file != null) ", saved as .pptx." else ".") } ?: "Deck."
+            Picture.isPicture(out) -> Picture.fromJson(out)?.summary?.ifBlank { null } ?: "Picture."
             isTable(out) -> table(producer, Canon.decodeTable(out), inputs)
             out is JsonObject && out["text"] != null && out["doc"] != null ->
                 RenderText.renderDoc(Canon.json.decodeFromJsonElement(DocAnswer.serializer(), out))

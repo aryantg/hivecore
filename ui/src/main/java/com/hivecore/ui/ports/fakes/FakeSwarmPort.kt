@@ -7,6 +7,8 @@ import com.hivecore.core.Profile
 import com.hivecore.ui.ports.InviteView
 import com.hivecore.ui.ports.JoinRequestView
 import com.hivecore.ui.ports.MemberView
+import com.hivecore.ui.ports.PairPingView
+import com.hivecore.ui.ports.PingReplyView
 import com.hivecore.ui.ports.RosterView
 import com.hivecore.ui.ports.SasView
 import com.hivecore.ui.ports.SwarmPort
@@ -32,6 +34,15 @@ class FakeSwarmPort(
     override val pendingJoins: StateFlow<List<JoinRequestView>> = joinsState
     val sasState = MutableStateFlow<List<SasView>>(emptyList())
     override val sasPrompts: StateFlow<List<SasView>> = sasState
+    val pingsState = MutableStateFlow<List<PairPingView>>(emptyList())
+    override val pairPings: StateFlow<List<PairPingView>> = pingsState
+    val repliesState = MutableStateFlow<List<PingReplyView>>(emptyList())
+    override val pingReplies: StateFlow<List<PingReplyView>> = repliesState
+
+    val pinged = mutableListOf<String>()
+    val answered = mutableListOf<Pair<String, Boolean>>()
+    /** Who answers a fake ping, and how (name → approved); empty = nobody answers. */
+    var pingAnswers: List<Pair<String, Boolean>> = listOf("Sales" to true)
 
     val confirmed = mutableListOf<Pair<String, Boolean>>()
     val approved = mutableListOf<String>()
@@ -57,6 +68,31 @@ class FakeSwarmPort(
             val sas = SasView("hs-${sasState.value.size + 1}", "Sales", "482 913")
             sasState.update { it + sas }
             sas
+        }
+    }
+
+    /** Pings "everyone on the Wi-Fi": the scripted phones in [pingAnswers] answer at once; an approval also opens a SAS. */
+    override suspend fun pingNearby(): Result<InviteView> = maybeFail {
+        inviteSeq++
+        val inv = InviteView("swarm://join?g=${rosterState.value.groupId}&k=MCowBQYDK2VwAyEAfakePubKey$inviteSeq&t=ping$inviteSeq", clock() + 10 * 60_000L)
+        pinged += inv.link
+        val now = clock()
+        for ((name, ok) in pingAnswers) {
+            repliesState.update { listOf(PingReplyView(name, ok, now)) + it }
+            if (ok) sasState.update { it + SasView("hs-${it.size + 1}", name, "482 913") }
+        }
+        inv
+    }
+
+    /** Scripts an incoming request (tests, the demo). */
+    fun receivePing(id: String, fromName: String, ts: Long = clock()) { pingsState.update { it + PairPingView(id, fromName, ts) } }
+
+    override suspend fun answerPing(id: String, approve: Boolean): Result<Unit> {
+        val ping = pingsState.value.firstOrNull { it.id == id } ?: return Result.failure(IllegalStateException("that request is gone"))
+        return maybeFail {
+            answered += id to approve
+            pingsState.update { list -> list.filterNot { it.id == id } }
+            if (approve) sasState.update { it + SasView("hs-${it.size + 1}", ping.fromName, "482 913") }
         }
     }
 

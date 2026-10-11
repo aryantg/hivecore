@@ -199,6 +199,12 @@ private fun ItemPicker(r: RecipeDef, state: JobsViewModel.UiState, onPickFiles: 
         when (r.input) {
             "prompt" -> HiveTextField(state.prompt, onPrompt, Modifier.fillMaxWidth(), label = "Brief", singleLine = false, minLines = 2)
             "none" -> Text("No items to pick: the job runs over ${r.itemKinds.joinToString()}.", style = MaterialTheme.typography.bodyMedium)
+            "table" -> {
+                val s = r.source
+                Text(if (s == null) "No items to pick." else "One item per ${s.key.joinToString(" and ") { it.replace('_', ' ') }} from this phone's ${s.table.replace('_', ' ')} table" +
+                    (if (s.by.isEmpty()) "" else ", with the figures per ${s.by.joinToString(" and ") { it.replace('_', ' ') }}") + ". The rows stay here; only each item's figures travel.",
+                    style = MaterialTheme.typography.bodyMedium)
+            }
             else -> {
                 Text(if (state.items.isEmpty()) "Pick ${r.itemKinds.joinToString()}" else Format.plural(state.items.size, "item") + " picked",
                     style = MaterialTheme.typography.titleSmall)

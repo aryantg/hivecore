@@ -47,18 +47,34 @@ object DemoWiring {
         if (keys != null) scope.launch(Dispatchers.IO) { runCatching { keys.ensure() } }
         val approval = ApprovalStore(keys, runCatching { KeystoreSigner() }.getOrNull(), runCatching { ApprovalNotifier(app) }.getOrNull(),
             debugAutoApprove = { BuildConfig.DEBUG && prefs.getBoolean(DemoKeys.DEBUG_AUTO_APPROVE, false) })
-        val ask = DemoAskPort(speed) {
+        val ask = DemoAskPort(speed, onNeedsApproval = {
             val r = approval.requestPlan("demo-plan-${System.currentTimeMillis()}", "Sales", DemoPortImpl.APPROVAL_DESCRIPTION, "7e1d0a90c44b2f81", listOf("h1", "h2", "h3"))
             r is ApprovalResult.Approved
-        }
+        })
+        // the scripted deck is a real .pptx under files/decks with an illustration drawn on this device (nothing is committed)
+        ask.materialiseDeck = { deck -> kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val picture = runCatching { DemoIllustration.draw(app) }.onFailure { SLog.w("DemoWiring", "illustration: ${it.message}") }.getOrNull()
+            val withPicture = com.hivecore.ui.demo.DemoDeck.build(picture?.path)
+            val dir = java.io.File(app.filesDir, "decks").apply { mkdirs() }
+            val bytes = com.hivecore.engine.deck.PptxWriter.bytes(withPicture)
+            val sha = com.hivecore.core.Hashing.sha256Hex(bytes)
+            val f = java.io.File(dir, "deck-${sha.take(12)}.pptx")
+            if (!f.isFile || f.length() != bytes.size.toLong()) f.writeBytes(bytes)
+            withPicture.copy(file = f.absolutePath, fileSha256 = sha, bytes = bytes.size.toLong())
+        } }
         val registry = FakeModelRegistry()
         val role = NodeRole.entries.firstOrNull { it.name == prefs.getString(DemoKeys.NODE_ROLE, null) } ?: NodeRole.SALES
+        // the Data screen shows what the real seed would load for this role (names, counts, flags from the manifest)
+        val schema = runCatching { app.assets.open("seed/seed_manifest.json").bufferedReader().use { it.readText() } }
+            .map { com.hivecore.node.data.SeedManifestSchema.schema(role, it) }
+            .onFailure { SLog.w("DemoWiring", "seed manifest: ${it.message}") }
+            .getOrElse { FakeSchemaSource.seed(role) }
         SLog.d("DemoWiring", "demo mode: scripted swarm, speed ${speed()}x")
         return HiveCoreGraph.Ports(
             selfId, ask, DemoJobRunner(speed), DemoSwarm.port(scope),
             FakeWorkerPolicy(Profile(selfId, now, LlmBackend.NPU, 17.0, idle = true, charging = true, batteryPct = 82, batteryTempC = 30f, thermal = 0,
                 workerOptIn = true, eligible = true, heavyOk = true, big = "llm")),
-            FakeModelsPort.sample(now), registry, FakeModelPool(registry), FakeSchemaSource(role), FakeDataAdmin(), FakeDataPort(),
+            FakeModelsPort.sample(now), registry, FakeModelPool(registry), FakeSchemaSource(schema), FakeDataAdmin(), FakeDataPort(),
             FakeSettingsPort(listOf(MemberView("sales", "Sales"), MemberView("accounts", "Accounts"))),
             consent = CloudConsent(),
             loadRecipes = { Recipes.fromAssets(app.assets::list) { app.assets.open(it) } },

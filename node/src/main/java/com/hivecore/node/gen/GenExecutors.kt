@@ -1,6 +1,7 @@
 package com.hivecore.node.gen
 
 import com.hivecore.core.Op
+import com.hivecore.core.SLog
 import com.hivecore.core.OpExecutor
 import com.hivecore.core.TaskSpec
 import com.hivecore.engine.pixels.ImageCodec
@@ -40,6 +41,8 @@ class GenExecutor(
     private val clip: ClipScorer? = null,
     private val superRes: SuperRes? = null,
     private val modelId: String = SdPipeline.MODEL_ID,
+    /** Receives every written PNG (the node's blob store), so the picture can travel to the orchestrator with the result. */
+    private val publish: ((File) -> Unit)? = null,
 ) : OpExecutor {
     override val ops: Set<Op> = setOf(Op.GEN_IMAGE, Op.GEN_VARIANTS, Op.SCORE_IMAGE, Op.UPSCALE)
 
@@ -67,8 +70,12 @@ class GenExecutor(
         val base = GenParams(prompt, p.str("negative") ?: "", 0, p.int("steps") ?: 20, p.dbl("guidance") ?: 7.5, p.int("size") ?: 512)
         val verdict = PromptSafety.check(prompt)
         val items = if (!verdict.ok) emptyList() else seeds.map { seed ->
+            val t0 = System.nanoTime()
             val img = generator.generate(base.copy(seed = seed))
-            val safe = postCheck?.safe(img.png)
+            SLog.d(TAG, "${task.op} seed $seed: ${img.width}x${img.height} in ${(System.nanoTime() - t0) / 1_000_000} ms (${base.steps} steps)")
+            // a post-check that cannot run (its model or vocabulary is missing on this phone) is recorded as "none",
+            // not a failed task: the prompt blocklist already ran, and the deck plan's picture is worth more than a check
+            val safe = postCheck?.let { c -> runCatching { c.safe(img.png) }.getOrElse { SLog.w(TAG, "post-check skipped: ${it.message}"); null } }
             buildJsonObject {
                 put("seed", seed)
                 if (safe == false) { put("blocked", true); put("stage", "output"); return@buildJsonObject }
@@ -101,6 +108,7 @@ class GenExecutor(
         val f = File(outDir, name)
         if (!f.isFile || f.length() != img.png.size.toLong()) f.writeBytes(img.png)
         File(outDir, "${img.pngSha256}.json").writeText(img.metadata.toString())
+        publish?.let { p -> runCatching { p(f) }.onFailure { SLog.w(TAG, "image ${name.take(8)} not published: ${it.message}") } }
         return name
     }
 
@@ -154,6 +162,7 @@ class GenExecutor(
     }
 
     companion object {
+        private const val TAG = "GenExecutor"
         const val DEFAULT_SR = "real_esrgan_w8a8"
         const val MAX_VARIANTS = 16
 

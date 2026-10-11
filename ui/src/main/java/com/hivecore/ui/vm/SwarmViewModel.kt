@@ -7,6 +7,8 @@ import com.hivecore.engine.device.Eligibility
 import com.hivecore.ui.Format
 import com.hivecore.ui.ports.InviteView
 import com.hivecore.ui.ports.JoinRequestView
+import com.hivecore.ui.ports.PairPingView
+import com.hivecore.ui.ports.PingReplyView
 import com.hivecore.ui.ports.RosterView
 import com.hivecore.ui.ports.SasView
 import com.hivecore.ui.ports.SwarmPort
@@ -60,6 +62,14 @@ class SwarmViewModel(
         data object None : Pairing
         data class ShowInvite(val invite: InviteView, val asLink: Boolean) : Pairing
         data class EnterLink(val link: String, val busy: Boolean, val error: String?) : Pairing
+        /** "Ping nearby" went out: the invite it carried and who answered so far (newest first). */
+        data class Pinged(val invite: InviteView, val replies: List<PingReplyView>) : Pairing {
+            val approved: Int get() = replies.count { it.approved }
+            val denied: Int get() = replies.count { !it.approved }
+            /** "Waiting for the other phones…" / "Sales approved · HR denied" */
+            val summary: String get() = if (replies.isEmpty()) "Waiting for the other phones to answer…"
+                else replies.sortedBy { it.fromName.lowercase(Locale.ROOT) }.joinToString(" · ") { "${it.fromName} ${if (it.approved) "approved" else "denied"}" }
+        }
     }
 
     data class UiState(
@@ -73,6 +83,8 @@ class SwarmViewModel(
         val pairing: Pairing = Pairing.None,
         /** the 6 digits waiting for Confirm, oldest first */
         val sas: List<SasView> = emptyList(),
+        /** pair requests other phones on this Wi-Fi sent, waiting for Approve / Deny */
+        val pings: List<PairPingView> = emptyList(),
         val pendingJoins: List<JoinRequestView> = emptyList(),
         val busy: Boolean = false,
         val message: String? = null,
@@ -99,6 +111,8 @@ class SwarmViewModel(
         scope.launch { port.peers.collect { refresh() } }
         scope.launch { port.sasPrompts.collect { s -> _state.update { it.copy(sas = s) } } }
         scope.launch { port.pendingJoins.collect { j -> _state.update { it.copy(pendingJoins = j) } } }
+        scope.launch { port.pairPings.collect { p -> _state.update { it.copy(pings = p) } } }
+        scope.launch { port.pingReplies.collect { r -> _state.update { s -> s.copy(pairing = (s.pairing as? Pairing.Pinged)?.copy(replies = r) ?: s.pairing) } } }
         scope.launch { port.warnings.collect { w -> w.firstOrNull()?.let { line -> _state.update { it.copy(message = line) } } } }
         if (policy != null) {
             scope.launch { policy.profile.collect { refresh() } }
@@ -170,6 +184,18 @@ class SwarmViewModel(
     /** Confirm (true) or reject (false) one 6-digit prompt. */
     fun confirmSas(sas: SasView, matches: Boolean) = action("confirm") {
         port.confirmSas(sas.handshakeId, matches).map { _state.update { it.copy(message = if (matches) "Paired with ${sas.peerName}" else "Rejected ${sas.peerName}") } }
+    }
+
+    /** Ping nearby: every phone on this Wi-Fi gets an Approve / Deny card for a fresh invite; the answers collect on the card. */
+    fun pingNearby() = action("ping") {
+        port.pingNearby().map { inv -> SLog.d(TAG, "pinged the Wi-Fi"); _state.update { it.copy(pairing = Pairing.Pinged(inv, port.pingReplies.value), message = "Pinged every phone on this Wi-Fi") } }
+    }
+
+    /** Approve (joins the invite the request carries; the six digits follow) or deny a request another phone sent. */
+    fun answerPing(ping: PairPingView, approve: Boolean) = action(if (approve) "approve" else "deny") {
+        port.answerPing(ping.id, approve).map {
+            _state.update { it.copy(message = if (approve) "Compare the 6 digits with ${ping.fromName}" else "Denied ${ping.fromName}") }
+        }
     }
 
     fun closePairing() { _state.update { it.copy(pairing = Pairing.None) } }

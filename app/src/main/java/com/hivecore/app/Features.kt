@@ -57,13 +57,14 @@ object Features {
         val all: Map<Screen, @Composable () -> Unit> = mapOf(
             Screen.ASK to {
                 val nav = LocalHiveNav.current
+                val credits by graph.credits.state.collectAsStateWithLifecycle()
                 AskRoute(graph.ask,
                     onOpenJob = { id -> graph.jobs.openHistory(id); nav?.go(Screen.JOBS) },
                     onOpenRecipe = { id -> graph.jobs.selectRecipe(id); nav?.go(Screen.JOBS) },
-                    statusLine = greetingLine(shellStatus(graph, flags)))
+                    statusLine = greetingLine(shellStatus(graph, flags), credits.balanceLine))
             },
             Screen.JOBS to { JobsRoute(graph.jobs, onPickFiles = rememberFilePicker { graph.jobs.addItems(it) }, onSamplePhotos = extras.samplePhotos) },
-            Screen.SWARM to { SwarmRoute(graph.swarm) },
+            Screen.SWARM to { SwarmRoute(graph.swarm, graph.credits) },
             Screen.MODELS to { ModelsRoute(graph.models) },
             Screen.DATA to { DataRoute(graph.data, roleControl = extras.roleControl) },
             Screen.SETTINGS to { SettingsRoute(graph.settings, cloud = "cloud" in flags, demoSection = extras.demoSection) },
@@ -89,11 +90,15 @@ object Features {
         return ShellStatus(phonesOnline = phones?.first, phonesTotal = phones?.second, bigModel = big, jobRunning = running, demo = demo)
     }
 
-    /** "3 of 3 phones ready · qwen3-4b loaded · private data stays on its phone" under the Home greeting, or null. */
-    fun greetingLine(s: ShellStatus): String? {
+    /**
+     * "3 of 3 phones ready · qwen3-4b loaded · 120 points · private data stays on its phone" under the Home greeting;
+     * null when neither a swarm, a model nor a points balance ([points], e.g. "120 points") is there to report.
+     */
+    fun greetingLine(s: ShellStatus, points: String? = null): String? {
         val parts = listOfNotNull(
             s.phonesTotal?.let { "${s.phonesOnline ?: 0} of $it ${if (it == 1) "phone" else "phones"} ready" },
             s.bigModel?.let { "$it loaded" },
+            points,
         )
         return if (parts.isEmpty()) null else (parts + "private data stays on its phone").joinToString(" · ")
     }

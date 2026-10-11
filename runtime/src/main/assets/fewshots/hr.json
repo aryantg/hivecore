@@ -3,24 +3,24 @@
     "Few-shot examples for the HR node's intent prompt (plan section 8). Loaded by com.hivecore.llm.FewShots.",
     "Shape: {role, shots:[{question, answer}]}. answer is an IntentSet object: {intents:[{table, metric, column?, group_by?, filters?}]} or {not_relevant:true}, optionally led by \"skip\" (measures that belong to another node; the parser ignores the key).",
     "Each shot becomes a user turn (the question) and an assistant turn (the answer re-encoded compactly, key order kept). Keep exactly three; mined rows are added at runtime by the evening close.",
-    "Shot 2 shows the coverage rule on a two-part question: units are not ours (skip), headcount is; the time phrase has no month column here to filter, so it is ignored. It sits second on purpose: measured on the NPU (Wave 4), the order avg / two-part / not_relevant gave the right Q1 intent in every run without making single-part questions grow a group_by."
+    "Kavira Pharmaceuticals tables (staff directory without pay; compensation with the confidential ctc and incentive_paid; branch codes BLR, CHN, KOC). Shot 2 shows the coverage rule on a two-part question: units are not ours (skip), headcount is; there is no month column here, so the time phrase is ignored."
   ],
   "role": "HR",
   "shots": [
     {
-      "question": "Average salary in the South region",
+      "question": "Average salary in the Chennai branch",
       "answer": {
         "skip": [],
         "intents": [
           {
-            "table": "employees",
+            "table": "compensation",
             "metric": "avg",
-            "column": "salary",
+            "column": "ctc",
             "filters": [
               {
-                "column": "region",
+                "column": "branch",
                 "op": "eq",
-                "value": "South"
+                "value": "CHN"
               }
             ]
           }
@@ -28,17 +28,17 @@
       }
     },
     {
-      "question": "Units sold per region last quarter, and how many staff per region?",
+      "question": "Units sold per branch last quarter, and how many staff per branch?",
       "answer": {
         "skip": [
           "units"
         ],
         "intents": [
           {
-            "table": "employees",
+            "table": "staff",
             "metric": "count",
             "group_by": [
-              "region"
+              "branch"
             ]
           }
         ]

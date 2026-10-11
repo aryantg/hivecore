@@ -1,0 +1,9 @@
+user_id,employee_id,name,designation,branch,role
+U01,KVR-0121,Manjunath Kulkarni,Managing Director,BLR,md
+U02,KVR-0134,Nagaraj Kulkarni,HR Manager,BLR,hr_admin
+U03,KVR-0135,Santosh Shenoy,HR Executive,BLR,hr_staff
+U04,KVR-0128,Vinay Joshi,Marketing Manager,BLR,marketing
+U05,KVR-0129,Deepa Joshi,Product Manager,BLR,marketing
+U06,KVR-0126,Saravanan Selvam,Branch Sales Manager,CHN,sales_manager
+U07,KVR-0138,Lakshmi Gowda,Finance Manager,BLR,finance
+U08,KVR-0100,Vishnu Mathew,Medical Representative,KOC,employee

@@ -32,6 +32,8 @@ import java.io.File
     val itemKinds: List<String> = listOf("image"),
     /** the destination table when [sink] has a table */
     val table: String? = null,
+    /** input "table": the rows of this phone's table that become the items (one item per distinct [RecipeSource.key]) */
+    val source: RecipeSource? = null,
 ) {
     /** True when the job makes images: results carry the "AI generated" badge and never go into data tables. */
     val generative: Boolean get() = stages.any { it.op in Recipes.GENERATIVE_OPS }
@@ -41,14 +43,31 @@ import java.io.File
     fun toRecipe(): Recipe = Recipe(id, version, title, stages, outputSchema, replicate, sink, itemKinds)
 }
 
+/**
+ * Where a `table` recipe's items come from (Kavira data amendment): the rows of [table] on the phone that starts the
+ * job, grouped by [key] (one item per distinct key), with the measures summed ([sum]) or averaged ([avg]) per
+ * [key] + [by] (a line per [by] value inside the item: "FY2025: stockist_sales 1,234,000 ..."). [where] keeps only
+ * the rows whose column has one of the listed values. Confidential columns are refused, so a fan-out over a table
+ * can never carry pay data to another phone; [limit] caps the items (LLM_MAP takes at most 64 per task).
+ */
+@Serializable data class RecipeSource(
+    val table: String,
+    val key: List<String>,
+    val by: List<String> = emptyList(),
+    val sum: List<String> = emptyList(),
+    val avg: List<String> = emptyList(),
+    val where: Map<String, List<String>> = emptyMap(),
+    val limit: Int = 64,
+)
+
 object Recipes {
     const val ASSET_DIR = "swarm/recipes"
 
     val AXES = listOf("shard", "chunk", "fanout", "pipeline")
     val MERGES = listOf("concat", "stitch", "tree", "monoid", "topk", "vote", "rank")
-    val INPUTS = setOf("files", "images", "prompt", "none")
+    val INPUTS = setOf("files", "images", "prompt", "none", "table")
     val SINKS = setOf("table", "folder", "table+folder")
-    val ITEM_KINDS = setOf("image", "pdf", "doc", "text", "audio", "video", "prompt", "question", "model")
+    val ITEM_KINDS = setOf("image", "pdf", "doc", "text", "audio", "video", "prompt", "question", "model", "row")
     val GENERATIVE_OPS = setOf(Op.GEN_IMAGE, Op.GEN_VARIANTS, Op.UPSCALE)
 
     /** §4B.1 table: the merge kinds each axis may declare. */
@@ -63,9 +82,17 @@ object Recipes {
     val BUILT_IN = listOf(
         "invoice_inbox", "site_photo_audit", "meeting_minutes", "cctv_count", "catalog_cleanup", "product_shot_batch",
         "gate2_eval", "synth_questions", "bench_all", "long_doc_summary", "image_batch_variants", "photo_text",
+        // Kavira Pharmaceuticals (fictional) demo workloads over the seeded tables
+        "stockist_letters", "brand_reviews", "branch_review_packs", "launch_messages", "launch_kit",
     )
 
+    /** The Kavira demo recipes, in the order the chat suggests them. */
+    val KAVIRA = listOf("stockist_letters", "brand_reviews", "branch_review_packs", "launch_messages", "launch_kit")
+
     private val ID = Regex("[a-z][a-z0-9_]*")
+    private val COL = Regex("[a-z_][a-z0-9_]*")
+    /** `LlmMapExecutor.MAX_ITEMS`: the most items one LLM_MAP task takes, so the most a table recipe fans out to */
+    const val LlmMapCap = 64
     private val REPLICATE = Regex("all|none|sample:(0(\\.\\d+)?|1(\\.0+)?)")
     private val json = Json { ignoreUnknownKeys = false }
 
@@ -106,6 +133,18 @@ object Recipes {
         if (r.itemKinds.isEmpty()) e += "no item kinds"
         r.itemKinds.filter { it !in ITEM_KINDS }.forEach { e += "unknown item kind '$it'" }
         if (r.input == "prompt" && "prompt" !in r.itemKinds) e += "a prompt recipe must list item kind 'prompt'"
+        if (r.input == "table") {
+            if ("row" !in r.itemKinds) e += "a table recipe must list item kind 'row'"
+            val src = r.source
+            if (src == null) e += "a table recipe needs a source"
+            else {
+                if (!ID.matches(src.table)) e += "source table '${src.table}' is not lower_snake_case"
+                if (src.key.isEmpty()) e += "source needs at least one key column"
+                if (src.limit !in 1..LlmMapCap) e += "source limit must be 1..$LlmMapCap"
+                (src.key + src.by + src.sum + src.avg + src.where.keys).filter { !COL.matches(it) }.forEach { e += "source column '$it' is not lower_snake_case" }
+                src.sum.intersect(src.avg.toSet()).forEach { e += "source column '$it' is both summed and averaged" }
+            }
+        } else if (r.source != null) e += "only a table recipe has a source"
         if (r.input in setOf("files", "images") && r.itemKinds.none { it in setOf("image", "pdf", "doc", "text", "audio", "video") })
             e += "a file recipe needs a file item kind"
         if (r.stages.isEmpty()) e += "no stages"

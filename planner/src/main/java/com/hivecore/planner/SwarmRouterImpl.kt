@@ -17,9 +17,10 @@ import com.hivecore.core.SwarmRouter
  *  - **Cues:** [CueLexicon] phrases in order of appearance, with the lexicon's gates for words that double as
  *    aggregate words (`per`, superlatives, `flag`).
  *  - **Composite** when there is a cue and an owner, or when more than one node owns a match and some owner has more
- *    than one measure named (more than one aggregate on one node, which one T1 JOB per node cannot carry).
+ *    than one measure named (more than one aggregate on one node, which one T1 JOB per node cannot carry), or when a
+ *    cue names an owner-free op ([CueLexicon.OWNER_FREE_OPS]: a picture drawn from the words needs no phone's data).
  *    Measures are the numeric, non-groupable, non-identifier, non-generic columns and their aliases.
- *  - No owner: not composite; the existing pipeline gives its broadcast / NoNode outcome.
+ *  - No owner and no owner-free cue: not composite; the existing pipeline gives its broadcast / NoNode outcome.
  */
 class SwarmRouterImpl : SwarmRouter {
 
@@ -38,10 +39,13 @@ class SwarmRouterImpl : SwarmRouter {
         val cues = cues(question, catalogs)
         val multiMeasureOwner = measuresByOwner.entries.firstOrNull { it.value.size > 1 }
         val multi = owners.size > 1 && multiMeasureOwner != null
+        // cues-3: a picture is drawn from the words, so it needs no owner
+        val generative = cues.any { it.op in CueLexicon.OWNER_FREE_OPS }
 
         val holds = matchedByOwner.entries.joinToString("; ") { (n, m) -> "$n: ${m.joinToString(", ")}" }
         val cueText = cues.joinToString(", ") { "'${it.word}' → ${it.op}" }
         val reason = when {
+            owners.isEmpty() && generative -> "T1 generative: cues $cueText need no phone's data"
             owners.isEmpty() && cues.isNotEmpty() -> "no catalog holds a term of the question (cues $cueText ignored); existing pipeline"
             owners.isEmpty() -> "no catalog holds a term of the question; existing pipeline"
             cues.isNotEmpty() -> "T2 composite: cues $cueText; owners $holds"
@@ -50,7 +54,7 @@ class SwarmRouterImpl : SwarmRouter {
             owners.all { it == selfId } -> "T0 local: no cue, only this phone holds the terms ($holds)"
             else -> "T1 direct: no cue, one aggregate per owner ($holds)"
         }
-        val composite = owners.isNotEmpty() && (cues.isNotEmpty() || multi)
+        val composite = generative || owners.isNotEmpty() && (cues.isNotEmpty() || multi)
         return RouteDecision(composite, owners, cues, "[${CueLexicon.VERSION}] $reason")
     }
 

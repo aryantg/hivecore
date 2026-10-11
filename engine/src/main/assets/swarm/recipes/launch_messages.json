@@ -1,0 +1,67 @@
+{
+  "id": "launch_messages",
+  "version": "1",
+  "title": "Launch messages",
+  "produces": "The Acneclear Gel launch announcement for the medical reps as a WhatsApp message in Kannada (Bengaluru), Tamil (Chennai) and Malayalam (Kochi): one translation per phone, from the branch master table",
+  "axis": "shard",
+  "merge": "concat",
+  "input": "table",
+  "itemKinds": [
+    "row"
+  ],
+  "sink": "table",
+  "table": "t_job_launch_messages",
+  "replicate": "none",
+  "source": {
+    "table": "branch_master",
+    "key": [
+      "branch",
+      "city",
+      "state_covered"
+    ],
+    "limit": 3
+  },
+  "stages": [
+    {
+      "id": "message",
+      "op": "LLM_MAP",
+      "params": {
+        "template": "Kavira Pharmaceuticals is announcing the launch of Acneclear Gel (adapalene 0.1% + clindamycin 1%, a 15 g tube for acne, launched June 2025) to its medical representatives. Write the announcement as one WhatsApp message in the main language of the branch below: Kannada for Karnataka, Tamil for Tamil Nadu, Malayalam for Kerala. Keep it under 120 words, name the brand in English, and add a short English gloss. Invent no prices or figures.\n\n{item}",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "language": {
+              "type": "string",
+              "maxLength": 30
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 700
+            },
+            "english_gloss": {
+              "type": "string",
+              "maxLength": 400
+            }
+          },
+          "required": [
+            "language",
+            "message"
+          ]
+        },
+        "maxTokens": 600,
+        "unitMs": 12000
+      }
+    }
+  ],
+  "outputSchema": [
+    {
+      "name": "item",
+      "type": "TEXT",
+      "identifier": true
+    },
+    {
+      "name": "output",
+      "type": "TEXT"
+    }
+  ]
+}

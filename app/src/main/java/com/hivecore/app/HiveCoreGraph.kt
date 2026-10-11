@@ -33,6 +33,7 @@ import com.hivecore.ui.ports.fakes.FakeModelsPort
 import com.hivecore.ui.ports.fakes.FakeSettingsPort
 import com.hivecore.ui.ports.fakes.FakeSwarmPort
 import com.hivecore.ui.vm.AskViewModel
+import com.hivecore.ui.vm.CreditsViewModel
 import com.hivecore.ui.vm.DataViewModel
 import com.hivecore.ui.vm.JobsViewModel
 import com.hivecore.ui.vm.ModelsViewModel
@@ -105,6 +106,8 @@ class HiveCoreGraph(
     val models: ModelsViewModel by lazy { ModelsViewModel(modelsPort, modelRegistry, modelPool, selfId, scope) }
     val data: DataViewModel by lazy { DataViewModel(schema, dataAdmin, dataPort, scope) }
     val settings: SettingsViewModel by lazy { SettingsViewModel(prefs, settingsPort, scope, ports.demoPort) }
+    /** The UI-only compute points: paid from the worker timeline, spent by every request from Home. */
+    val credits: CreditsViewModel by lazy { CreditsViewModel(prefs, ports.workerActivity, selfId, { id -> swarmPort.roster.value.nameOf(id) }, scope) }
 
     companion object {
         @Volatile private var instance: HiveCoreGraph? = null
@@ -128,6 +131,14 @@ class HiveCoreGraph(
                 com.hivecore.core.Feed.current = g.feed
                 g.feed.attachWarnings()
                 runCatching { com.hivecore.app.demo.FeedBridges.start(g, g.feed, scope) }.onFailure { SLog.e("Graph", "feed bridges failed", it) }
+                // compute points: every request spends, every settled job for another phone pays and notifies
+                runCatching {
+                    val notifier = com.hivecore.app.credits.CreditsNotifier(app)
+                    g.credits.notifyAward = { a -> notifier.notify(a, g.credits.state.value.balance) }
+                    g.ask.onSubmitted = { g.credits.spend() }
+                }.onFailure { SLog.e("Graph", "credits wiring failed", it) }
+                // "Ping nearby" requests from other phones also reach the owner as a notification with Approve / Deny
+                runCatching { com.hivecore.app.pairing.PairPingNotifier(app).bind(g.swarmPort, scope) }.onFailure { SLog.e("Graph", "pair ping notifier failed", it) }
             }
         }
 

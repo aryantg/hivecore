@@ -81,8 +81,30 @@ class TieredPlannerTest {
         assertEquals(PlanTier.T1, p.tier)
         assertNull(p.plan)
         assertNotNull(p.refusal)
-        assertTrue(p.refusal, p.refusal!!.contains("cloud planner"))
+        assertFalse("the refusal stays one plain sentence", p.refusal!!.contains("cloud planner"))
+        assertTrue(p.note, p.note!!.contains("cloud planner"))
         assertTrue(t2.calls.isNotEmpty())
+    }
+
+    @Test fun aPictureRequestPlansAtT1WithoutTheCloud() = runTest {
+        val llm = FakeLlmEngine().apply { replies["which plan fits"] = "make_image" }
+        val t2 = ScriptedT2(Result.success(PlannedQuestion(t2Dag, 0.9)))
+        val p = facade(llm, t2).plan("Create an image of my team", catalogs, caps)
+        assertTrue(p.route.reason, p.route.composite)
+        assertEquals(PlanTier.T1, p.tier)
+        assertTrue(p.refusal ?: p.compiled?.check?.errors.toString(), p.ok)
+        assertEquals("make_image", p.plan!!.dag.patternId)
+        assertEquals(listOf(Op.GEN_IMAGE, Op.RENDER), p.plan!!.dag.tasks.map { it.op })
+        assertTrue("the picture's 'image' names image.gen, which the patterns cover, so T2 is not asked", t2.calls.isEmpty())
+        assertEquals(setOf("image.gen"), CapabilityCues.named("Create an image of my team"))
+        assertEquals(setOf("vlm"), CapabilityCues.named("What is in this photo?"))
+    }
+
+    @Test fun aQuestionAboutAPhonesDataWithoutACueIsRefusedInPlainWords() = runTest {
+        val p = facade(FakeLlmEngine()).plan("Revenue per region this year", catalogs, caps)
+        assertEquals(PlanTier.T0, p.tier)
+        assertTrue(p.refusal, p.refusal!!.startsWith("That is about the data on 1 phone, but I can't turn it into steps"))
+        assertTrue(p.note!!.contains("T1 direct") || p.note!!.contains("T0 local"))
     }
 
     @Test fun lowConfidenceAfterOneClarificationGoesToT2() = runTest {

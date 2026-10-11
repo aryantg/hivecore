@@ -3,7 +3,7 @@
     "Few-shot examples for the Sales node's intent prompt (plan section 8). Loaded by com.hivecore.llm.FewShots.",
     "Shape: {role, shots:[{question, answer}]}. answer is an IntentSet object: {intents:[{table, metric, column?, group_by?, filters?}]} or {not_relevant:true}, optionally led by \"skip\" (measures that belong to another node; the parser ignores the key).",
     "Each shot becomes a user turn (the question) and an assistant turn (the answer re-encoded compactly, key order kept). Keep exactly three; mined rows are added at runtime by the evening close.",
-    "Shot 2 shows a single month value (YYYY-MM). Shot 3 shows the coverage rule on a two-part question (reps are HR's, so skip them; only units) and a period range (last quarter = 2026-07..2026-09 in the demo year). Placed last, measured on the NPU (Wave 4): the Q1 sentence then ends after one intent (68 tokens) instead of adding a rep count (121 tokens, past the 4.5 s budget)."
+    "Kavira Pharmaceuticals tables (sales_monthly with net_sales, units, branch, branch_city, month YYYY-MM). Shot 2 shows a single month and a city filter; shot 3 the coverage rule on a two-part question (reps are HR's, so skip them; only units) and a fiscal year as a month range (FY2026 = 2025-04..2026-03)."
   ],
   "role": "SALES",
   "shots": [
@@ -14,14 +14,14 @@
       }
     },
     {
-      "question": "Revenue in March in the West",
+      "question": "Net sales in March 2026 in Chennai",
       "answer": {
         "skip": [],
         "intents": [
           {
-            "table": "sales",
+            "table": "sales_monthly",
             "metric": "sum",
-            "column": "revenue",
+            "column": "net_sales",
             "filters": [
               {
                 "column": "month",
@@ -29,9 +29,9 @@
                 "value": "2026-03"
               },
               {
-                "column": "region",
+                "column": "branch_city",
                 "op": "eq",
-                "value": "West"
+                "value": "Chennai"
               }
             ]
           }
@@ -39,29 +39,29 @@
       }
     },
     {
-      "question": "Units sold per region last quarter, and how many reps per region?",
+      "question": "Units sold per branch in FY2026, and how many reps per branch?",
       "answer": {
         "skip": [
           "reps"
         ],
         "intents": [
           {
-            "table": "sales",
+            "table": "sales_monthly",
             "metric": "sum",
             "column": "units",
             "group_by": [
-              "region"
+              "branch"
             ],
             "filters": [
               {
                 "column": "month",
                 "op": "gte",
-                "value": "2026-07"
+                "value": "2025-04"
               },
               {
                 "column": "month",
                 "op": "lte",
-                "value": "2026-09"
+                "value": "2026-03"
               }
             ]
           }

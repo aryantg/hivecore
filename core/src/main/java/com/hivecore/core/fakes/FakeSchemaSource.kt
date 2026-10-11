@@ -34,7 +34,7 @@ class FakeSchemaSource(@Volatile var current: Schema) : SchemaSource {
                 ColumnDef("region", ColType.TEXT, groupable = true),
                 ColumnDef("rep_id", ColType.TEXT, identifier = true),
                 ColumnDef("month", ColType.TEXT, groupable = true),
-                ColumnDef("revenue", ColType.INTEGER),
+                ColumnDef("revenue", ColType.INTEGER, aliases = listOf("sales", "turnover", "income")),
                 ColumnDef("units", ColType.INTEGER)
             )
         )

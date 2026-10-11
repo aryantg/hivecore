@@ -40,7 +40,7 @@ class RecipesTest {
 
     @Test fun generativeRecipesGoToAFolderAndConvertToCoreRecipe() {
         val gen = all.filter { it.generative }.map { it.id }.toSet()
-        assertEquals(setOf("product_shot_batch", "image_batch_variants"), gen)
+        assertEquals(setOf("product_shot_batch", "image_batch_variants", "launch_kit"), gen)
         for (r in all.filter { it.generative }) { assertTrue(r.sinksFolder); assertEquals("prompt", r.input) }
         val core = all.first { it.id == "invoice_inbox" }.toRecipe()
         assertEquals("invoice_inbox", core.id)

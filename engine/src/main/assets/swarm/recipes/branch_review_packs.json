@@ -1,0 +1,85 @@
+{
+  "id": "branch_review_packs",
+  "version": "1",
+  "title": "Monday review packs",
+  "produces": "The Monday sales review pack for each branch: a one-page summary, the top three issues and talking points for the branch sales manager, from net sales and units per fiscal year and channel; one pack per branch, in parallel",
+  "axis": "shard",
+  "merge": "concat",
+  "input": "table",
+  "itemKinds": [
+    "row"
+  ],
+  "sink": "table",
+  "table": "t_job_branch_packs",
+  "replicate": "none",
+  "source": {
+    "table": "sales_monthly",
+    "key": [
+      "branch",
+      "branch_city"
+    ],
+    "by": [
+      "fiscal_year",
+      "channel"
+    ],
+    "sum": [
+      "net_sales",
+      "units"
+    ],
+    "limit": 8
+  },
+  "stages": [
+    {
+      "id": "pack",
+      "op": "LLM_MAP",
+      "params": {
+        "template": "You prepare the Monday sales review for one branch of Kavira Pharmaceuticals. Below are the branch's net sales (rupees) and units per fiscal year and sales channel. Write the pack: a one-page summary, exactly three top issues, and three to five talking points for the branch sales manager. Quote figures only as given; invent nothing.\n\n{item}",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string",
+              "maxLength": 700
+            },
+            "top_issues": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 160
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "talking_points": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 160
+              },
+              "minItems": 3,
+              "maxItems": 5
+            }
+          },
+          "required": [
+            "summary",
+            "top_issues",
+            "talking_points"
+          ]
+        },
+        "maxTokens": 700,
+        "unitMs": 14000
+      }
+    }
+  ],
+  "outputSchema": [
+    {
+      "name": "item",
+      "type": "TEXT",
+      "identifier": true
+    },
+    {
+      "name": "output",
+      "type": "TEXT"
+    }
+  ]
+}

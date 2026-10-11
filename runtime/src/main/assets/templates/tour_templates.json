@@ -5,7 +5,8 @@
     "Match = normalised exact sentence (lowercase, punctuation stripped, spaces collapsed), scoped per role: the same sentence maps to different intents on HR and Sales, and a role without an entry simply has no template.",
     "A {doc, locator} entry names the chunk the node reads via DocIndex.chunkAt and then runs the normal RAG prompt over; if the LLM fails, the chunk's sentence with the most query terms is returned. Nothing here stores an answer, so numbers change when data changes.",
     "The planner also uses an intent entry to override an LLM not_relevant for that exact sentence. Chip = TEMPLATE only when this file produced the intent or chunk choice.",
-    "Dates assume the demo year 2026 (seed manifest today = 2026-10-10). Q3 is kept on purpose: the compiler refuses a filter on an identifier column of a confidential table, which is the tour's refusal story. Q4 (the decline path) has no template."
+    "Dates assume the demo year 2026 (seed manifest today = 2026-10-10). Q3 is kept on purpose: the compiler refuses a filter on an identifier column of a confidential table, which is the tour's refusal story. Q4 (the decline path) has no template.",
+    "K1 is the Kavira deck's owner sub-question: 'Generate a pitch deck showing the increase in sales FY2024-26' plans AGG 'sales by month FY2024 26' on the Sales phone, so the headline deck reads net sales per month over FY2024-26 without depending on the model's intent."
   ],
   "templates": [
     {
@@ -49,6 +50,13 @@
       "question": "What were the Q3 priorities?",
       "roles": {
         "SALES": {"doc": "q3_review.pptx", "locator": "slide 3"}
+      }
+    },
+    {
+      "id": "K1",
+      "question": "sales by month FY2024-26",
+      "roles": {
+        "SALES": {"intents": [{"table": "sales_monthly", "metric": "sum", "column": "net_sales", "group_by": ["month"], "filters": [{"column": "month", "op": "gte", "value": "2023-04"}, {"column": "month", "op": "lte", "value": "2026-03"}]}]}
       }
     }
   ]

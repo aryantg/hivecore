@@ -1,0 +1,59 @@
+{
+  "default": "deny",
+  "salary_fields": [
+    "ctc_annual_inr",
+    "fixed_annual_inr",
+    "variable_target_inr",
+    "incentive_paid_fy2026_inr",
+    "monthly_travel_allowance_inr"
+  ],
+  "roles": {
+    "md": {
+      "individual": "all",
+      "aggregate": "all"
+    },
+    "hr_admin": {
+      "individual": "all",
+      "aggregate": "all"
+    },
+    "hr_staff": {
+      "individual": "all except Leadership and HR departments",
+      "aggregate": "all"
+    },
+    "finance": {
+      "individual": "none",
+      "aggregate": "all"
+    },
+    "marketing": {
+      "individual": "none",
+      "aggregate": "Sales department only"
+    },
+    "sales_manager": {
+      "individual": "none",
+      "aggregate": "own branch, Sales department only"
+    },
+    "employee": {
+      "individual": "self only",
+      "aggregate": "none"
+    }
+  },
+  "aggregate_rules": {
+    "min_group_size": 5,
+    "allowed_functions": [
+      "count",
+      "average",
+      "sum"
+    ],
+    "blocked_functions": [
+      "min",
+      "max",
+      "top_n",
+      "rank",
+      "list"
+    ],
+    "round_averages_to_inr": 1000,
+    "block_if_query_names_or_excludes_an_individual": true,
+    "block_if_group_differs_from_a_recent_query_by_fewer_than": 5
+  },
+  "execution": "Each branch phone holds only hr_shards/hr_<BRANCH>.csv and returns (count, sum) per group, never rows. The anchor merges partials, then applies min_group_size to the merged group before answering."
+}

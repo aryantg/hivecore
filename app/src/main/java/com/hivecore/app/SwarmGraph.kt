@@ -136,6 +136,8 @@ class SwarmGraph(
         val docAnswerer: DocAnswerer? = null,
         val guard: DifferencingGuard? = null,
         val blobDir: File? = null,
+        /** where a deck plan's .pptx lands (null = decks as structure only) */
+        val deckDir: File? = null,
         val nameOf: (String) -> String = { it.take(8) },
         val modelHash: () -> String = { "" },
         /** this phone's data version (default: [dataVersion] over [db]) */
@@ -149,6 +151,8 @@ class SwarmGraph(
         val recipeDefs: () -> List<RecipeDef> = { emptyList() },
         val evalCases: () -> List<JsonElement> = { emptyList() },
         val modelItems: () -> List<JsonElement> = { emptyList() },
+        /** items of a `table` recipe from this phone's data store (null = no store on this build) */
+        val tableItems: ((com.hivecore.engine.workload.RecipeSource) -> List<JsonElement>)? = null,
         val backend: () -> String = { llm.backend.value?.name?.lowercase() ?: "" },
         val clock: () -> Long = System::currentTimeMillis,
         /** "today" for the planner's date phrases (tests pin it; the phone uses [clock]) */
@@ -202,7 +206,7 @@ class SwarmGraph(
                 intentPlanner = d.intentPlanner, compiler = RuleIntentCompiler(), executor = SqlQueryExecutor(d.db) { AnswerChip.LLM }, planCompiler = PlanCompilerImpl(),
                 approval = d.approval, guard = d.guard ?: SqlDifferencingGuard(d.db, RuleIntentCompiler(), d.clock),
                 planner = planner, policy = policy, ledger = d.ledger, docIndex = d.docIndex, docAnswerer = d.docAnswerer,
-                blobDir = d.blobDir, runner = d.wrapRunner(runner), extraExecutors = executors, nameOf = d.nameOf, modelHash = d.modelHash,
+                blobDir = d.blobDir, deckDir = d.deckDir, runner = d.wrapRunner(runner), extraExecutors = executors, nameOf = d.nameOf, modelHash = d.modelHash,
                 backend = d.backend, clock = d.clock,
                 decorateProfile = { p -> p.copy(dataVersion = d.dataVersion(), p50 = p.p50 + d.p50()) },
                 journal = d.journal, memo = d.memo, escalator = d.escalator, readyFor = d.readyFor, unitMsOf = d.unitMsOf,
@@ -213,6 +217,7 @@ class SwarmGraph(
             node.recipes = { id, v -> d.recipeDefs().firstOrNull { it.id == id && (v.isEmpty() || it.version == v) }?.toRecipe() }
             node.evalCases = d.evalCases
             node.modelItems = d.modelItems
+            d.tableItems?.let { node.tableItems = it }
             node.privateTables = d.privateTables
             node.privateDocs = {
                 val ids = d.privateDocs()
@@ -278,6 +283,8 @@ object SwarmExecutors {
         val ask: (suspend (String) -> AskOutcome)? = null,
         val bench: Bench? = null,
         val clipModel: () -> String? = { registry?.installed()?.firstOrNull { it.task == "embed_image_text" }?.id },
+        /** receives every generated PNG (the node's blob store) so a picture can travel with its TASK_RESULT */
+        val publish: ((File) -> Unit)? = null,
     )
 
     fun build(env: SwarmGraph.ExecutorEnv, s: Seams): List<OpExecutor> {
@@ -295,7 +302,7 @@ object SwarmExecutors {
             val clip = if (vision != null) clipScorer(vision, s.clipModel) else null
             out += GenExecutor(s.imageGenerator, File(s.outDir, "gen"), s.codec,
                 postCheck = if (vision != null) clipSafety(vision, s.clipModel, File(s.outDir, "gen_check")) else null,
-                clip = clip, superRes = vision?.let { superRes(it) })
+                clip = clip, superRes = vision?.let { superRes(it) }, publish = s.publish)
         }
         out += DevAiExecutor(ask = s.ask, bench = s.bench)
         return out
@@ -312,10 +319,12 @@ object SwarmExecutors {
     }
 
     /** Labels the post-check votes over (CLIP zero-shot); the first is the safe reading. */
-    val SAFETY_LABELS = listOf("an ordinary safe photo", "explicit nudity", "graphic violence and gore")
+    /** The first [SAFE_COUNT] are the safe readings (a photo, an illustration: the deck plan's pictures are charts), the rest unsafe. */
+    val SAFETY_LABELS = listOf("an ordinary safe photo", "an illustration, chart or diagram", "abstract art", "explicit nudity", "graphic violence and gore")
+    const val SAFE_COUNT = 3
 
     /**
-     * Generated-image post-check: CLIP zero-shot (softmax over [SAFETY_LABELS]); safe when the safe label wins. No CLIP
+     * Generated-image post-check: CLIP zero-shot (softmax over [SAFETY_LABELS]); safe when a safe reading wins. No CLIP
      * model installed → null (the generator's prompt blocklist still applies; the metadata records "postCheck: none").
      */
     fun clipSafety(vision: OpExecutor, model: () -> String?, tmp: File): ImageSafetyCheck? = ImageSafetyCheck { png ->
@@ -327,7 +336,9 @@ object SwarmExecutors {
                 putJsonArray("vocabulary") { SAFETY_LABELS.forEach { add(JsonPrimitive(it)) } }; put("template", "{}"); put("threshold", 0.0)
             }, modelId = id)
             val tags = vision.execute(t, emptyList(), listOf(f)).getOrThrow().jsonObject["items"]!!.jsonArray[0].jsonObject["tags"]!!.jsonArray
-            (tags.firstOrNull()?.jsonObject?.get("tag")?.jsonPrimitive?.content ?: SAFETY_LABELS[0]) == SAFETY_LABELS[0]
+            val top = tags.firstOrNull()?.jsonObject?.get("tag")?.jsonPrimitive?.content ?: SAFETY_LABELS[0]
+            SLog.d("SwarmExecutors", "generated image post-check: top reading \"$top\"")
+            SAFETY_LABELS.indexOf(top) in 0 until SAFE_COUNT
         } finally { f.delete() }
     }
 

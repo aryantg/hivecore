@@ -1,0 +1,52 @@
+employee_id,name,department,designation,branch,work_location,territory,area_code,date_of_joining,tenure_years,grade,reporting_manager_id,fiscal_year,ctc_annual_inr,fixed_annual_inr,variable_target_inr,incentive_paid_fy2026_inr,monthly_travel_allowance_inr
+KVR-0053,Nithya Subramanian,Sales,Area Sales Manager,CHN,Field,,CHN-A1,2020-04-25,5.9,M1,KVR-0126,FY2026,830000,722000,108000,92600,12900
+KVR-0054,Ganesh Pandian,Sales,Area Sales Manager,CHN,Field,,CHN-A2,2022-02-13,4.1,M1,KVR-0126,FY2026,796000,692000,104000,109400,12900
+KVR-0055,Meena Selvam,Sales,Area Sales Manager,CHN,Field,,CHN-A3,2020-03-01,6.1,M1,KVR-0126,FY2026,889000,773000,116000,123200,12600
+KVR-0056,Senthil Ramasamy,Sales,Area Sales Manager,CHN,Field,,CHN-A4,2016-05-04,9.9,M1,KVR-0126,FY2026,846000,736000,110000,112300,12800
+KVR-0057,Saravanan Krishnan,Sales,Senior Medical Representative,CHN,Field,Coimbatore,CHN-A3,2022-03-14,4.0,F2,KVR-0055,FY2026,384000,334000,50000,38700,9700
+KVR-0058,Saravanan Sundaram,Sales,Senior Medical Representative,CHN,Field,Madurai,CHN-A4,2021-09-10,4.6,F2,KVR-0056,FY2026,392000,341000,51000,54300,10000
+KVR-0059,Lakshmi Arumugam,Sales,Senior Medical Representative,CHN,Field,Coimbatore,CHN-A3,2022-03-26,4.0,F2,KVR-0055,FY2026,371000,323000,48000,38700,10300
+KVR-0060,Karthik Natarajan,Sales,Senior Medical Representative,CHN,Field,Chennai South,CHN-A2,2022-02-21,4.1,F2,KVR-0054,FY2026,405000,352000,53000,45700,7200
+KVR-0061,Priya Pandian,Sales,Senior Medical Representative,CHN,Field,Chennai South,CHN-A2,2019-12-02,6.3,F2,KVR-0054,FY2026,450000,391000,59000,50800,7600
+KVR-0062,Vignesh Arumugam,Sales,Senior Medical Representative,CHN,Field,Salem,CHN-A3,2022-02-23,4.1,F2,KVR-0055,FY2026,408000,355000,53000,46500,10800
+KVR-0063,Ganesh Krishnan,Sales,Senior Medical Representative,CHN,Field,Chennai North,CHN-A1,2020-09-17,5.5,F2,KVR-0053,FY2026,402000,350000,52000,48500,6800
+KVR-0064,Balaji Krishnan,Sales,Senior Medical Representative,CHN,Field,Madurai,CHN-A4,2022-02-13,4.1,F2,KVR-0056,FY2026,385000,335000,50000,52000,9800
+KVR-0065,Sangeetha Shankar,Sales,Senior Medical Representative,CHN,Field,Vellore,CHN-A1,2021-05-01,4.9,F2,KVR-0053,FY2026,383000,333000,50000,72000,8600
+KVR-0066,Senthil Pandian,Sales,Principal Medical Representative,CHN,Field,Tiruchirappalli,CHN-A4,2016-05-22,9.9,F3,KVR-0056,FY2026,476000,414000,62000,65800,10500
+KVR-0067,Balaji Selvam,Sales,Principal Medical Representative,CHN,Field,Chennai North,CHN-A1,2017-04-11,9.0,F3,KVR-0053,FY2026,491000,427000,64000,58000,6100
+KVR-0068,Revathi Arumugam,Sales,Senior Medical Representative,CHN,Field,Chennai North,CHN-A1,2020-01-23,6.2,F2,KVR-0053,FY2026,453000,394000,59000,52000,7000
+KVR-0069,Sangeetha Krishnan,Sales,Senior Medical Representative,CHN,Field,Coimbatore,CHN-A3,2020-09-18,5.5,F2,KVR-0055,FY2026,423000,368000,55000,39400,9400
+KVR-0070,Sangeetha Rajan,Sales,Senior Medical Representative,CHN,Field,Madurai,CHN-A4,2021-02-28,5.1,F2,KVR-0056,FY2026,394000,343000,51000,47600,9600
+KVR-0071,Vignesh Subramanian,Sales,Senior Medical Representative,CHN,Field,Chennai West,CHN-A2,2020-02-02,6.2,F2,KVR-0054,FY2026,396000,344000,52000,55500,6300
+KVR-0072,Sangeetha Subramanian,Sales,Principal Medical Representative,CHN,Field,Chennai South,CHN-A2,2017-04-19,8.9,F3,KVR-0054,FY2026,487000,423000,64000,56900,6000
+KVR-0073,Prabhu Venkatesan,Sales,Senior Medical Representative,CHN,Field,Chennai North,CHN-A1,2021-03-05,5.1,F2,KVR-0053,FY2026,461000,401000,60000,61400,7300
+KVR-0074,Anitha Kumar,Sales,Senior Medical Representative,CHN,Field,Madurai,CHN-A4,2021-01-29,5.2,F2,KVR-0056,FY2026,420000,365000,55000,57600,8800
+KVR-0075,Priya Selvam,Sales,Senior Medical Representative,CHN,Field,Coimbatore,CHN-A3,2020-03-05,6.1,F2,KVR-0055,FY2026,446000,388000,58000,46000,8600
+KVR-0076,Meena Pandian,Sales,Principal Medical Representative,CHN,Field,Chennai North,CHN-A1,2016-08-12,9.6,F3,KVR-0053,FY2026,506000,440000,66000,55000,6700
+KVR-0077,Meena Rajan,Sales,Senior Medical Representative,CHN,Field,Chennai North,CHN-A1,2019-08-18,6.6,F2,KVR-0053,FY2026,424000,369000,55000,53000,6400
+KVR-0078,Vignesh Rajan,Sales,Senior Medical Representative,CHN,Field,Chennai South,CHN-A2,2022-01-14,4.2,F2,KVR-0054,FY2026,412000,358000,54000,39500,7300
+KVR-0079,Vignesh Krishnan,Sales,Senior Medical Representative,CHN,Field,Madurai,CHN-A4,2022-02-18,4.1,F2,KVR-0056,FY2026,369000,321000,48000,53200,9800
+KVR-0080,Ganesh Sundaram,Sales,Principal Medical Representative,CHN,Field,Chennai South,CHN-A2,2019-04-08,7.0,F3,KVR-0054,FY2026,471000,410000,61000,50000,7600
+KVR-0081,Meena Krishnan,Sales,Senior Medical Representative,CHN,Field,Tiruchirappalli,CHN-A4,2022-02-22,4.1,F2,KVR-0056,FY2026,372000,323000,49000,57300,9500
+KVR-0082,Prabhu Arumugam,Sales,Principal Medical Representative,CHN,Field,Chennai West,CHN-A2,2015-09-23,10.5,F3,KVR-0054,FY2026,546000,475000,71000,85000,5900
+KVR-0083,Vignesh Pandian,Sales,Principal Medical Representative,CHN,Field,Chennai West,CHN-A2,2015-09-20,10.5,F3,KVR-0054,FY2026,533000,463000,70000,83800,6100
+KVR-0084,Ganesh Ramasamy,Sales,Senior Medical Representative,CHN,Field,Chennai South,CHN-A2,2020-05-13,5.9,F2,KVR-0054,FY2026,444000,386000,58000,41200,7100
+KVR-0085,Ganesh Shankar,Sales,Senior Medical Representative,CHN,Field,Tiruchirappalli,CHN-A4,2021-06-12,4.8,F2,KVR-0056,FY2026,419000,364000,55000,70700,9600
+KVR-0086,Balaji Kumar,Sales,Principal Medical Representative,CHN,Field,Tirunelveli,CHN-A4,2017-07-26,8.7,F3,KVR-0056,FY2026,433000,377000,56000,77500,8400
+KVR-0087,Lakshmi Krishnan,Sales,Principal Medical Representative,CHN,Field,Coimbatore,CHN-A3,2015-04-25,10.9,F3,KVR-0055,FY2026,496000,431000,65000,54100,10400
+KVR-0088,Dinesh Selvam,Sales,Senior Medical Representative,CHN,Field,Chennai North,CHN-A1,2021-06-05,4.8,F2,KVR-0053,FY2026,418000,363000,55000,52400,7900
+KVR-0089,Dinesh Natarajan,Sales,Principal Medical Representative,CHN,Field,Coimbatore,CHN-A3,2013-07-14,12.7,F3,KVR-0055,FY2026,509000,443000,66000,51400,8900
+KVR-0090,Lakshmi Selvam,Sales,Medical Representative,CHN,Field,Salem,CHN-A3,2023-07-20,2.7,F1,KVR-0055,FY2026,339000,295000,44000,41800,9800
+KVR-0091,Arun Kumar,Sales,Medical Representative,CHN,Field,Tirunelveli,CHN-A4,2024-12-17,1.3,F1,KVR-0056,FY2026,324000,282000,42000,56400,10000
+KVR-0092,Saravanan Kumar,Sales,Medical Representative,CHN,Field,Chennai South,CHN-A2,2024-04-28,1.9,F1,KVR-0054,FY2026,359000,312000,47000,43500,7000
+KVR-0093,Balaji Shankar,Sales,Medical Representative,CHN,Field,Chennai West,CHN-A2,2025-06-09,0.8,F1,KVR-0054,FY2026,331000,288000,43000,40200,6700
+KVR-0094,Kavitha Ramasamy,Sales,Medical Representative,CHN,Field,Chennai West,CHN-A2,2025-11-04,0.4,F1,KVR-0054,FY2026,344000,299000,45000,22700,7600
+KVR-0126,Saravanan Selvam,Sales,Branch Sales Manager,CHN,Branch office,,,2019-01-07,7.2,M3,KVR-0124,FY2026,1449000,1260000,189000,166900,0
+KVR-0143,Sangeetha Pandian,Finance,Branch Accountant,CHN,Branch office,,,2022-01-04,4.2,E2,KVR-0138,FY2026,401000,371000,30000,27100,0
+KVR-0151,Arun Selvam,Branch Operations,Branch Operations Executive,CHN,Branch office,,,2021-04-15,5.0,E2,KVR-0126,FY2026,319000,304000,15000,14000,0
+KVR-0152,Divya Selvam,Branch Operations,Branch Operations Executive,CHN,Branch office,,,2022-01-29,4.2,E2,KVR-0126,FY2026,313000,298000,15000,13300,0
+KVR-0153,Revathi Krishnan,Branch Operations,Branch Operations Executive,CHN,Branch office,,,2021-07-16,4.7,E2,KVR-0126,FY2026,309000,294000,15000,15500,0
+KVR-0154,Karthik Sundaram,Branch Operations,Branch Operations Executive,CHN,Branch office,,,2016-11-18,9.4,E2,KVR-0126,FY2026,382000,364000,18000,17900,0
+KVR-0155,Dinesh Arumugam,Branch Operations,Branch Operations Executive,CHN,Branch office,,,2017-04-17,9.0,E2,KVR-0126,FY2026,348000,331000,17000,16400,0
+KVR-0156,Nithya Pandian,Branch Operations,Branch Operations Executive,CHN,Branch office,,,2021-10-04,4.5,E2,KVR-0126,FY2026,303000,289000,14000,13200,0
+KVR-0163,Divya Rajan,Commercial,Tender Manager,CHN,Branch office,,,2024-08-01,1.7,M2,KVR-0122,FY2026,886000,805000,81000,78100,0

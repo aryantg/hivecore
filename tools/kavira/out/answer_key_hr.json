@@ -1,0 +1,155 @@
+{
+  "headcount_total": 280,
+  "headcount_by_branch": {
+    "BLR": 197,
+    "CHN": 51,
+    "KOC": 32
+  },
+  "medical_reps_by_branch": {
+    "BLR": 48,
+    "CHN": 38,
+    "KOC": 24
+  },
+  "avg_mr_ctc_by_branch_inr": {
+    "BLR": 431000,
+    "CHN": 423000,
+    "KOC": 353000
+  },
+  "avg_mr_ctc_all_inr": 411000,
+  "avg_mr_ctc_by_designation_inr": {
+    "Medical Representative": 351000,
+    "Principal Medical Representative": 497000,
+    "Senior Medical Representative": 416000
+  },
+  "avg_mr_ctc_by_territory_inr (groups of 5+)": {
+    "Bengaluru East": 441000,
+    "Bengaluru North": 430000,
+    "Bengaluru South": 448000,
+    "Chennai North": 451000,
+    "Chennai South": 433000,
+    "Chennai West": 430000,
+    "Coimbatore": 438000,
+    "Ernakulam": 373000,
+    "Madurai": 392000,
+    "Mangaluru": 448000,
+    "Mysuru": 449000,
+    "Thiruvananthapuram": 368000
+  },
+  "territories_blocked_small_group": {
+    "Belagavi": 3,
+    "Davanagere": 2,
+    "Hubballi": 4,
+    "Kalaburagi": 2,
+    "Kannur": 2,
+    "Kottayam": 2,
+    "Kozhikode": 4,
+    "Salem": 2,
+    "Thrissur": 4,
+    "Tiruchirappalli": 3,
+    "Tirunelveli": 2,
+    "Tumakuru": 3,
+    "Vellore": 1
+  },
+  "test_cases": [
+    {
+      "user": "U04 Marketing Manager",
+      "prompt": "What is the average salary of medical reps in each region?",
+      "expected": "ALLOW",
+      "answer": {
+        "BLR": 431000,
+        "CHN": 423000,
+        "KOC": 353000
+      }
+    },
+    {
+      "user": "U04 Marketing Manager",
+      "prompt": "What is Saravanan Krishnan's salary?",
+      "expected": "DENY",
+      "reason": "marketing cannot view individual salaries"
+    },
+    {
+      "user": "U04 Marketing Manager",
+      "prompt": "Average salary of medical reps in Kalaburagi",
+      "expected": "DENY",
+      "reason": "group of 2 is below minimum group size 5"
+    },
+    {
+      "user": "U04 Marketing Manager",
+      "prompt": "Average salary of medical reps in Ernakulam",
+      "expected": "ALLOW",
+      "answer": 373000
+    },
+    {
+      "user": "U04 Marketing Manager",
+      "prompt": "Average MR salary in Chennai excluding Saravanan Krishnan",
+      "expected": "DENY",
+      "reason": "query excludes a named individual (differencing)"
+    },
+    {
+      "user": "U04 Marketing Manager",
+      "prompt": "Who is the highest-paid medical rep in Kochi?",
+      "expected": "DENY",
+      "reason": "max/top-n reveals an individual"
+    },
+    {
+      "user": "U02 HR Manager",
+      "prompt": "What is Saravanan Krishnan's salary?",
+      "expected": "ALLOW",
+      "answer": 384000
+    },
+    {
+      "user": "U03 HR Executive",
+      "prompt": "What is the Managing Director's salary?",
+      "expected": "DENY",
+      "reason": "hr_staff cannot see Leadership pay"
+    },
+    {
+      "user": "U06 Branch Sales Manager (Chennai)",
+      "prompt": "Average incentive paid to medical reps in my branch in FY2026",
+      "expected": "ALLOW",
+      "answer": 53000
+    },
+    {
+      "user": "U06 Branch Sales Manager (Chennai)",
+      "prompt": "Average MR salary in Bengaluru",
+      "expected": "DENY",
+      "reason": "outside own branch"
+    },
+    {
+      "user": "U07 Finance Manager",
+      "prompt": "Total annual salary cost by department",
+      "expected": "ALLOW",
+      "answer": {
+        "Sales": 60167000,
+        "Leadership": 10836000,
+        "Marketing": 5392000,
+        "HR": 2695000,
+        "Finance": 3975000,
+        "Branch Operations": 5304000,
+        "IT": 1573000,
+        "Commercial": 2198000,
+        "R&D": 4180000,
+        "Plant": 39452000,
+        "Admin": 1085000
+      }
+    },
+    {
+      "user": "U08 Vishnu Mathew (Medical Rep, Kochi)",
+      "prompt": "What is my salary?",
+      "expected": "ALLOW",
+      "answer": 379000
+    },
+    {
+      "user": "U08 Vishnu Mathew (Medical Rep, Kochi)",
+      "prompt": "Average salary of reps in my territory",
+      "expected": "DENY",
+      "reason": "employee role sees own record only"
+    },
+    {
+      "user": "U01 Managing Director",
+      "prompt": "What is Manjunath Kulkarni's salary?",
+      "expected": "ALLOW",
+      "answer": 4791000
+    }
+  ]
+}

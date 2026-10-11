@@ -153,4 +153,41 @@ class SwarmViewModelTest {
         vm.revoke("hr"); settle()
         assertEquals("Could not revoke: not the admin", vm.state.value.message)
     }
+
+    @Test fun pingNearbyCollectsTheAnswersOnTheCard() = runTest {
+        val vm = vm(FakeWorkerPolicy(idleSelf))
+        port.pingAnswers = listOf("Sales" to true, "Accounts" to false)
+        settle()
+        vm.pingNearby(); settle()
+        assertEquals(1, port.pinged.size)
+        assertEquals("Pinged every phone on this Wi-Fi", vm.state.value.message)
+        val p = vm.state.value.pairing as SwarmViewModel.Pairing.Pinged
+        assertEquals(now + 10 * 60_000L, p.invite.expiresTs)
+        assertEquals(1, p.approved); assertEquals(1, p.denied)
+        assertEquals("Accounts denied · Sales approved", p.summary)
+        // the approving phone's handshake shows its six digits here too
+        assertEquals(listOf("Sales"), vm.state.value.sas.map { it.peerName })
+        vm.closePairing()
+        assertEquals(SwarmViewModel.Pairing.None, vm.state.value.pairing)
+
+        port.failNext = IllegalStateException("no Wi-Fi network to ping")
+        vm.pingNearby(); settle()
+        assertEquals("Could not ping: no Wi-Fi network to ping", vm.state.value.message)
+    }
+
+    @Test fun anIncomingPingIsApprovedOrDenied() = runTest {
+        val vm = vm(FakeWorkerPolicy(idleSelf))
+        port.receivePing("p1", "HR"); port.receivePing("p2", "Ops"); settle()
+        assertEquals(listOf("HR", "Ops"), vm.state.value.pings.map { it.fromName })
+        vm.answerPing(vm.state.value.pings[0], approve = true); settle()
+        assertEquals(listOf("p1" to true), port.answered)
+        assertEquals(listOf("Ops"), vm.state.value.pings.map { it.fromName })
+        assertEquals("Compare the 6 digits with HR", vm.state.value.message)
+        assertEquals(listOf("HR"), vm.state.value.sas.map { it.peerName })
+        vm.answerPing(vm.state.value.pings[0], approve = false); settle()
+        assertEquals(listOf("p1" to true, "p2" to false), port.answered)
+        assertTrue(vm.state.value.pings.isEmpty())
+        assertEquals("Denied Ops", vm.state.value.message)
+        assertEquals(1, vm.state.value.sas.size)
+    }
 }

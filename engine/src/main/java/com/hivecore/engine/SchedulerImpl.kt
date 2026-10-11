@@ -115,7 +115,8 @@ class SchedulerImpl : Scheduler {
         const val DEFAULT_LINK_KBPS = 1200.0          // ~150 KB/s, the §9 Bluetooth planning figure
         const val DEFAULT_PAYLOAD_BYTES = 4000.0
         const val DEFAULT_P50_MS = 200.0
-        const val DEFAULT_HEAVY_P50_MS = 3000.0
+        /** diffusion on the NPU: the SD 1.5 bundle loads in 2-8 s and a 512 px image takes 5 s warm to 27 s cold on the iQOO 15 NPU, plus the CLIP check (phone pass of the deck plan) */
+        const val DEFAULT_HEAVY_P50_MS = 45_000.0
         const val DEFAULT_WARM_MS = 2000.0
         const val QUEUE_MS = 3000.0
 

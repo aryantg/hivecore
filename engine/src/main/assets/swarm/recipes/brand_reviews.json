@@ -1,0 +1,79 @@
+{
+  "id": "brand_reviews",
+  "version": "1",
+  "title": "Brand reviews",
+  "produces": "A one-page performance review for each of the 16 brands and the contract clients from their net sales and units per fiscal year, with three recommendations each; 19 reviews spread across the phones",
+  "axis": "shard",
+  "merge": "concat",
+  "input": "table",
+  "itemKinds": [
+    "row"
+  ],
+  "sink": "table",
+  "table": "t_job_brand_reviews",
+  "replicate": "none",
+  "source": {
+    "table": "sales_monthly",
+    "key": [
+      "brand",
+      "therapy_area"
+    ],
+    "by": [
+      "fiscal_year"
+    ],
+    "sum": [
+      "net_sales",
+      "units"
+    ],
+    "limit": 64
+  },
+  "stages": [
+    {
+      "id": "review",
+      "op": "LLM_MAP",
+      "params": {
+        "template": "You are the product manager at Kavira Pharmaceuticals. Below are one brand's net sales (rupees) and units per Indian fiscal year (April to March). Write a one-page review: a headline, a paragraph on how the brand performed and why the trend matters, and exactly three recommendations. Quote figures only as given; invent nothing.\n\n{item}",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "headline": {
+              "type": "string",
+              "maxLength": 120
+            },
+            "performance": {
+              "type": "string",
+              "maxLength": 600
+            },
+            "recommendations": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 160
+              },
+              "minItems": 3,
+              "maxItems": 3
+            }
+          },
+          "required": [
+            "headline",
+            "performance",
+            "recommendations"
+          ]
+        },
+        "maxTokens": 600,
+        "unitMs": 11000
+      }
+    }
+  ],
+  "outputSchema": [
+    {
+      "name": "item",
+      "type": "TEXT",
+      "identifier": true
+    },
+    {
+      "name": "output",
+      "type": "TEXT"
+    }
+  ]
+}

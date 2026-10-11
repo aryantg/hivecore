@@ -1,0 +1,84 @@
+{
+  "net_sales_inr_cr": {
+    "FY2023": 41.93,
+    "FY2024": 43.12,
+    "FY2025": 49.62,
+    "FY2026": 59.51
+  },
+  "yoy_growth_pct": {
+    "FY2024": 2.8,
+    "FY2025": 15.1,
+    "FY2026": 19.9
+  },
+  "growth_fy2024_to_fy2026_pct": 38.0,
+  "cagr_fy2024_fy2026_pct": 17.5,
+  "segment_net_sales_inr_lakh": {
+    "FY2023": {
+      "Branded Formulations": 3292.6,
+      "Contract Manufacturing": 900.4
+    },
+    "FY2024": {
+      "Branded Formulations": 3493.5,
+      "Contract Manufacturing": 818.4
+    },
+    "FY2025": {
+      "Branded Formulations": 4027.3,
+      "Institutional": 334.8,
+      "Contract Manufacturing": 600.2
+    },
+    "FY2026": {
+      "Branded Formulations": 4604.0,
+      "Institutional": 501.8,
+      "Contract Manufacturing": 845.4
+    }
+  },
+  "branch_net_sales_inr_lakh": {
+    "FY2023": {
+      "BLR": 2741.8,
+      "CHN": 1451.1
+    },
+    "FY2024": {
+      "BLR": 2678.4,
+      "CHN": 1452.6,
+      "KOC": 180.9
+    },
+    "FY2025": {
+      "BLR": 2610.7,
+      "CHN": 1897.7,
+      "KOC": 453.9
+    },
+    "FY2026": {
+      "BLR": 3056.4,
+      "CHN": 2189.2,
+      "KOC": 705.6
+    }
+  },
+  "top5_brands_fy2026_inr_lakh": [
+    [
+      "Paracare 650",
+      651.7
+    ],
+    [
+      "Metfora SR 500",
+      462.3
+    ],
+    [
+      "Telmira 40",
+      447.8
+    ],
+    [
+      "Azikind 500",
+      422.6
+    ],
+    [
+      "Cefikind 200",
+      408.1
+    ]
+  ],
+  "employee_cost_inr_lakh": {
+    "FY2023": 910.9,
+    "FY2024": 1030.3,
+    "FY2025": 1176.1,
+    "FY2026": 1350.1
+  }
+}

@@ -57,7 +57,9 @@ sealed interface Compiled {
         val docAnswers: List<DocAnswer>, val chip: AnswerChip, val provenance: List<Provenance>, val timing: Timing, val notes: List<String>,
         val rowsMoved: Long, val rowsHeld: Long, val approvals: Int, val phones: Int,
         /** swarm plan §8.2: set when a composite (T2) plan produced the answer */
-        val plan: PlanSummary? = null) : AskOutcome
+        val plan: PlanSummary? = null,
+        /** a structured result beside the sentence (a deck: `{"kind":"deck", …}`), when the plan's output is one */
+        val artifact: JsonElement? = null) : AskOutcome
     @Serializable @SerialName("refusal") data class Refusal(val reasons: List<Pair<String, String>>, val timing: Timing) : AskOutcome
     @Serializable @SerialName("nonode")  data class NoNode(val holdings: List<Pair<String, List<String>>>, val timing: Timing) : AskOutcome
 }

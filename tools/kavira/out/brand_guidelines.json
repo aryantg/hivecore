@@ -1,0 +1,18 @@
+{
+  "tagline": "Trusted care for every home",
+  "colors": {
+    "primary": "#0E7C86",
+    "secondary": "#1B2A49",
+    "accent": "#F2A541",
+    "positive": "#2E9E5B",
+    "negative": "#D64545",
+    "background": "#FFFFFF"
+  },
+  "fonts": {
+    "heading": "Montserrat",
+    "body": "Inter"
+  },
+  "tone": "confident, factual, plain English; every claim backed by a number from facts.json",
+  "number_format": "INR X.X Cr for totals, INR X lakh for smaller figures; growth to one decimal",
+  "image_style": "clean, bright, photorealistic, teal and navy tones, no text, no logos, no identifiable faces"
+}

@@ -79,12 +79,32 @@ object TextInputs {
         out.filter { it.text.isNotBlank() }
     }
 
+    /** `{"columns":[…],"rows":[[…]]}` as text (at most [MAX_TABLE_ROWS] rows), or null when [o] is not a table. */
+    fun tableText(o: JsonObject): String? = with(TJson) {
+        val cols = o.arr("columns")?.mapNotNull { (it as? JsonPrimitive)?.content } ?: return null
+        val rows = o.arr("rows") ?: return null
+        if (cols.isEmpty()) return null
+        val sb = StringBuilder()
+        o.str("title")?.let { sb.append(it).append('\n') }
+        sb.append(cols.joinToString(", "))
+        for (r in rows.take(MAX_TABLE_ROWS)) {
+            val cells = (r as? JsonArray) ?: continue
+            sb.append('\n').append(cols.indices.joinToString(", ") { i -> "${cols[i]}: ${(cells.getOrNull(i) as? JsonPrimitive)?.content ?: ""}" })
+        }
+        if (rows.size > MAX_TABLE_ROWS) sb.append("\n… ${rows.size - MAX_TABLE_ROWS} more rows")
+        sb.toString()
+    }
+
+    private const val MAX_TABLE_ROWS = 60
+
     fun paragraphs(doc: String, text: String): List<SourceUnit> =
         text.replace("\r\n", "\n").split(PARA).map { it.trim() }.filter { it.isNotEmpty() }
             .mapIndexed { i, t -> SourceUnit(doc, "¶ ${i + 1}", t) }
 
     private fun fromObject(o: JsonObject, fallbackDoc: String): List<SourceUnit> = with(TJson) {
         val out = ArrayList<SourceUnit>()
+        // a table (an AGG or reduce output) reads as one unit: a header line and one "col: value" line per row
+        tableText(o)?.let { out += SourceUnit(o.str("title") ?: fallbackDoc, "0", it, fallbackDoc) }
         o.arr("units")?.forEach { u -> (u as? JsonObject)?.let { x ->
             val doc = x.str("doc") ?: fallbackDoc; val unit = x.str("unit") ?: "0"
             x.str("text")?.let { out += SourceUnit(doc, unit, it, x.str("id") ?: "$doc${Sentences.SEP}$unit") }

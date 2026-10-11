@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The directories the file provider may hand out: decks the swarm wrote, and the demo's drawn illustration. -->
+<paths>
+    <files-path name="decks" path="decks/" />
+    <cache-path name="demo" path="demo/" />
+</paths>
