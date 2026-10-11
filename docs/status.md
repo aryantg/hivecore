@@ -62,6 +62,16 @@ Without `mesh`, the node runs over an in-process loopback transport, so split jo
   an image of", "what data do you have") is answered at once by `SwarmGuide` from the catalog and the capability summary,
   with no plan and no model; a request for a picture of a chart of the data is pointed at the deck, since charts come from
   the real figures. Refusals are one plain sentence plus the guide's hint; the route reason sits in the details.
+- **Open paths** (spec amendment "open paths"): a question falls through the pattern library, the on-device graph planner
+  (`LocalGraphPlanner`, tier T1G: the phone's model writes a spec 7.3 graph over the analysis ops, the compiler checks it,
+  one repair round), the direct plan (`DirectPlanner`: one AGG per phone the question names, one DOC for a document
+  question, a chart step for a chart word) and, when nothing plans, an offer to answer from the model's own knowledge
+  (`KnowledgePlan`: one GEN_TEXT step, unverified, only after a yes). Charts come out as `ChartCard` (bar or line) from
+  `engine.chart.ChartAssembler`. A single cue-chosen pattern is no longer vetoed by the closed choice.
+- **Owners without a model**: a pattern task's `expect` block compiles straight through the owner's guarded compiler
+  (`AggExecutor.intentOf`), so pattern plans never need the owner's language model; a phone with under 5 GB free keeps
+  the 4 GB bundle unloaded (eager and on-demand) and answers free-form questions with a plain "no model loaded".
+  `node.data.FilterValues` snaps the intent model's filter values to the column's stored values ("2026" → "FY2026").
 - **Swarm**: Scan QR uses the camera (CameraX + ML Kit's bundled barcode model); Copy, Share and the battery exemption
   are wired. **Ping nearby** (spec amendment "ping nearby") broadcasts a fresh invite to every phone on the Wi-Fi
   (`mesh.LanPairPing`, UDP 47475); each one shows "X wants to pair" with Approve / Deny on the Swarm screen and as a

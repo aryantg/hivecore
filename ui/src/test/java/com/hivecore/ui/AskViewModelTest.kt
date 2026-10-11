@@ -180,6 +180,29 @@ class AskViewModelTest {
         assertTrue("nothing ran", port.runs.isEmpty())
     }
 
+    @Test fun anOfferWaitsThenRunsTheKnowledgePlanOnYesOrRefusesOnNo() = runTest {
+        port.planFor = { PlanOptions.Offer(it, "Nothing on your phones covers this. Shall I answer from the language model's own knowledge instead?") }
+        val vm = vm()
+        vm.setRequest("What is the capital of France?"); vm.submit()
+        runCurrent()
+        assertTrue(vm.state.value.phase is Phase.Offering)
+        assertTrue(vm.state.value.thread.last() is com.hivecore.ui.vm.ChatTurn.Offer)
+        assertTrue("nothing ran yet", port.runs.isEmpty())
+        vm.acceptOffer()
+        settle()
+        assertEquals(listOf("What is the capital of France?", "knowledge:What is the capital of France?"), port.planned)
+        assertEquals(1, port.runs.size)
+        assertTrue(vm.state.value.history.single().outcome is AskViewModel.Outcome.Answer)
+        // and no
+        vm.setRequest("Who won the 1983 World Cup?"); vm.submit()
+        runCurrent()
+        vm.declineOffer()
+        val r = (vm.state.value.history.first().outcome as AskViewModel.Outcome.Refused).refusal
+        assertTrue(r.sentence, r.sentence.contains("the model's own knowledge was not used"))
+        assertEquals(Phase.Idle, vm.state.value.phase)
+        assertEquals(1, port.runs.size)
+    }
+
     @Test fun defaultModeFollowsThePolicy() {
         val plan = FakeAskPort.samplePlan("q")
         val local = ModeEstimate(RunMode.LOCAL, 5_000, 0.0, "nothing", 3)

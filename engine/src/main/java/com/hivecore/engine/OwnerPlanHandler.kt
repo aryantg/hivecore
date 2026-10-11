@@ -91,7 +91,8 @@ class OwnerPlanHandler(
             val q = agg.questionOf(t)
             if (q == null) { refusal = "task ${t.id} has no sub-question"; break }
             if (t.op == Op.AGG) {
-                val c = agg.compileAgg(q, s).getOrElse { refusal = it.message ?: "could not compile '$q'"; null } ?: break
+                // a pattern plan's task says exactly what it expects: compile that; only a free-form sub-question needs the model
+                val c = agg.intentOf(t, s) ?: agg.compileAgg(q, s).getOrElse { refusal = it.message ?: "could not compile '$q'"; null } ?: break
                 tasks[t.id] = PreparedTask.Agg(c); intents[t.id] = c.intent; queries += c
             } else {
                 val d = agg.prepareDoc(q, s).getOrElse { refusal = it.message ?: "could not read documents for '$q'"; null } ?: break

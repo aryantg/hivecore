@@ -48,6 +48,8 @@ XxxScreen(state, callbacks...)    stateless; one HiveScreen; previews
 | Steps, figures, timelines | `StepList` |
 | A deck in an answer | `DeckCard` (thumbnails + Present / Open / Share), `DeckSheet` (the pager), `SlideView` |
 | A picture in an answer | `PictureCard` (the PNG a phone drew + Open / Share); `GeneratedImage` for any generated PNG by path |
+| A chart in an answer | `ChartCard` (one series as bars or a line, from `ChartArtifact`); `BarChart` / `LineChart` for a series anywhere |
+| A yes / no the swarm needs before it runs | an inline turn with `ActionRow(primary, secondaries)`, like the offer to use the model's knowledge |
 | One choice of a few | `SegmentedChoice` |
 | Settings | `PreferenceGroup` + `SwitchRow` / `KeyValue` / `PreferenceDivider` |
 | Text input | `HiveTextField`, `IntField`, `DoubleField`, `SaveableTextField` |

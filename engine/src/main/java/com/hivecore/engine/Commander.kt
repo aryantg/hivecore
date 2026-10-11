@@ -30,6 +30,8 @@ import com.hivecore.engine.deck.Deck
 import com.hivecore.engine.deck.DeckAssembler
 import com.hivecore.engine.picture.Picture
 import com.hivecore.engine.picture.PictureAssembler
+import com.hivecore.engine.chart.ChartArtifact
+import com.hivecore.engine.chart.ChartAssembler
 import com.hivecore.mesh.MeshJson
 import com.hivecore.mesh.MsgType
 import com.hivecore.mesh.PlanBody
@@ -309,6 +311,12 @@ class Commander(
                     PictureAssembler.assemble(t.spec, t.spec.inputs.map { id -> tasks.getValue(id).spec to tasks.getValue(id).output!! }, blobFile, deckDir).toJson()
                 } catch (e: Exception) {
                     throw Failed(listOf(selfName to "the picture could not be assembled: ${e.message ?: e.javaClass.simpleName}"))
+                }
+                // the chart step: the owner's table becomes one series the chat draws
+                ChartAssembler.isChartStep(t.spec) -> try {
+                    ChartAssembler.assemble(t.spec, t.spec.inputs.map { id -> tasks.getValue(id).spec to tasks.getValue(id).output!! }).toJson()
+                } catch (e: Exception) {
+                    throw Failed(listOf(selfName to "the chart could not be drawn: ${e.message ?: e.javaClass.simpleName}"))
                 }
                 t.spec.op == Op.RENDER -> inputs.first()
                 else -> reducer.run(t.spec.op, t.spec.params, inputs).getOrElse {
@@ -680,7 +688,14 @@ class Commander(
             val finalTable = if (final.spec.op == Op.AGG) null else runCatching { Canon.decodeTable(out) }.getOrNull()
             val producer = producerOf(final)
             val inputsOfProducer = producer.spec.inputs.mapNotNull { id -> tasks[id]?.output?.let { runCatching { Canon.decodeTable(it) }.getOrNull() } }
-            val text = PlanRenderer.render(producer.spec, out, inputsOfProducer, notes)
+            // a plain RENDER over several steps (the direct plan's one answer per phone) says each in turn
+            val text = if (isPlainRender(final.spec) && final.spec.inputs.size > 1) {
+                final.spec.inputs.mapNotNull { id -> tasks[id] }.joinToString(" ") { r ->
+                    val p = producerOf(r)
+                    val ins = p.spec.inputs.mapNotNull { id -> tasks[id]?.output?.let { runCatching { Canon.decodeTable(it) }.getOrNull() } }
+                    PlanRenderer.render(p.spec, r.output!!, ins, emptyList())
+                } + if (notes.isEmpty()) "" else " (${notes.joinToString("; ")})"
+            } else PlanRenderer.render(producer.spec, out, inputsOfProducer, notes)
             val lines = tasks.values.map { r ->
                 val where = r.executors.joinToString("+") { if (it == selfId) "here" else if (isCloud(it)) it else nameOf(it) }.ifEmpty { "–" }
                 val time = if (r.fromMemo) "memo" else PlanRenderer.seconds(r.ms)
@@ -693,14 +708,16 @@ class Commander(
                 provenance = provenance, timing = Timing(totalMs = clock() - t0), notes = notes.toList(),
                 rowsMoved = 0, rowsHeld = ownerTables.sumOf { it.rowsHeld }, approvals = approvals, phones = phones,
                 plan = PlanSummary(dag.patternId, dag.tasks.size, lines, tasks.values.count { it.verified }, confidence, planHash),
-                artifact = out.takeIf { Deck.isDeck(it) || Picture.isPicture(it) },
+                artifact = out.takeIf { Deck.isDeck(it) || Picture.isPicture(it) || ChartArtifact.isChart(it) },
             )
         }
 
-        /** RENDER passes its input through: the sentence template is the one of the op that produced the value (a deck or a picture is its own producer). */
+        private fun isPlainRender(spec: TaskSpec) =
+            spec.op == Op.RENDER && !DeckAssembler.isDeckStep(spec) && !PictureAssembler.isPictureStep(spec) && !ChartAssembler.isChartStep(spec)
+
+        /** RENDER passes its input through: the sentence template is the one of the op that produced the value (a deck, a picture or a chart is its own producer). */
         private fun producerOf(t: TaskRun): TaskRun =
-            if (t.spec.op == Op.RENDER && !DeckAssembler.isDeckStep(t.spec) && !PictureAssembler.isPictureStep(t.spec) && t.spec.inputs.isNotEmpty())
-                tasks[t.spec.inputs.first()]?.let { producerOf(it) } ?: t else t
+            if (isPlainRender(t.spec) && t.spec.inputs.isNotEmpty()) tasks[t.spec.inputs.first()]?.let { producerOf(it) } ?: t else t
 
         private fun provenance(): List<Provenance> {
             val out = ArrayList<Provenance>()
@@ -743,6 +760,9 @@ object PlanRenderer {
         val body = when {
             Deck.isDeck(out) -> Deck.fromJson(out)?.let { d -> "${d.summary} Deck: ${d.slides.size} slides, \"${d.title}\"" + (if (d.file != null) ", saved as .pptx." else ".") } ?: "Deck."
             Picture.isPicture(out) -> Picture.fromJson(out)?.summary?.ifBlank { null } ?: "Picture."
+            ChartArtifact.isChart(out) -> ChartArtifact.fromJson(out)?.summary?.ifBlank { null } ?: "Chart."
+            // GEN_TEXT: the generated value (a string, or an object's string fields in order)
+            out is JsonObject && (out["op"] as? JsonPrimitive)?.content == Op.GEN_TEXT.name && out["value"] != null -> generatedText(out["value"]!!)
             isTable(out) -> table(producer, Canon.decodeTable(out), inputs)
             out is JsonObject && out["text"] != null && out["doc"] != null ->
                 RenderText.renderDoc(Canon.json.decodeFromJsonElement(DocAnswer.serializer(), out))
@@ -753,6 +773,12 @@ object PlanRenderer {
     }
 
     private fun isTable(e: JsonElement) = e is JsonObject && e["columns"] is JsonArray && e["rows"] is JsonArray
+
+    private fun generatedText(v: JsonElement): String = when (v) {
+        is JsonPrimitive -> v.content
+        is JsonObject -> v.values.filterIsInstance<JsonPrimitive>().filter { it.isString }.joinToString("\n") { it.content }.ifBlank { Canon.canonical(v) }
+        else -> Canon.canonical(v)
+    }
 
     fun table(spec: TaskSpec, t: AggTable, inputs: List<AggTable>): String {
         if (t.rows.isEmpty()) return "${sentenceCase(t.title)}: no rows match."
@@ -779,7 +805,11 @@ object PlanRenderer {
         val numName = num?.let { measureName(it) } ?: "value"
         val denName = when {
             op == Op.SHARE && inputs.size == 1 -> "the total"
-            den == "n" || den?.startsWith("count") == true -> singular(RenderText.noun(inputs.getOrNull(1)?.node ?: ""))
+            // a count's noun is the counted table as its title says it ("Staff by branch" → "staff member"), else the node's noun
+            den == "n" || den?.startsWith("count") == true -> {
+                val known = RenderText.noun(inputs.getOrNull(1)?.node ?: "")
+                if (known != "rows") singular(known) else inputs.getOrNull(1)?.let { countNoun(it) } ?: "row"
+            }
             den != null -> measureName(den)
             else -> "value"
         }
@@ -823,11 +853,26 @@ object PlanRenderer {
 
     private fun singular(noun: String) = when (noun) { "rows" -> "row"; else -> noun.removeSuffix("s") }
 
+    /** "Staff by branch, FY2026" → "staff member"; "Employees by region" → "employee"; null when the title is not a count's. */
+    fun countNoun(t: AggTable): String? {
+        if ("n" !in t.columns || t.columns.any { it.startsWith("sum_") || it.startsWith("avg_") }) return null
+        val head = t.title.substringBefore(" by ").substringBefore(",").trim().lowercase().removePrefix("number of ").removePrefix("count of ").trim()
+        if (head.isEmpty() || head == "rows") return null
+        return when {
+            head in UNCOUNTABLE -> "$head member"
+            head.endsWith("ies") -> head.dropLast(3) + "y"
+            head.endsWith("s") && !head.endsWith("ss") -> head.dropLast(1)
+            else -> head
+        }
+    }
+
+    private val UNCOUNTABLE = setOf("staff", "personnel", "headcount", "sales force", "workforce", "crew")
+
     private fun sentenceCase(s: String) = s.replaceFirstChar { it.uppercase() }
 
     fun seconds(ms: Long): String = if (ms < 1000) "$ms ms" else String.format(java.util.Locale.ROOT, "%.1f s", ms / 1000.0)
 
-    private fun text(v: JsonElement): String = when (v) {
+    fun text(v: JsonElement): String = when (v) {
         is JsonNull -> "(blank)"
         is JsonPrimitive -> if (v.isString) v.content else number(v)
         else -> v.toString()

@@ -157,6 +157,32 @@ would look like for the data", "create an image of my team") after the guide and
   `files/decks/picture-6ca27d677b7b.png`. SD 1.5 read "my team" as a flat-lay of objects, not people: a fuller subject
   ("my team of five colleagues at a desk") draws what is meant.
 
+## Open paths phone pass and the demo findings (2026-10-11, same three phones, all flags, `-PhiveDemoThermal`)
+
+What ran on phone 1 after the "open paths" amendment landed: "create an image of a penguin drinking tea" (the cue
+chooses `make_image`; drawn in 20 s), "net sales by branch in FY2026 as a bar chart" (direct plan: AGG on the Sales
+phone + RENDER chart, 3.7 s, bars with the Indian-scale labels), "What is the capital of France" (the offer card,
+then one GEN_TEXT step on phone 1 in 0.8 s, badged unverified with the "model's own knowledge" note).
+
+What the live demo found and what changed:
+
+- The Sales phone's model wrote `fiscal_year = "2026"` for a column that holds `FY2026`, so the query matched no row
+  and the floor refusal ("every group has fewer than 5 rows") came back. `node.data.FilterValues` now snaps equality
+  filter values on text columns to the stored values (case, punctuation, prefix) before the query runs.
+- "Sales per rep by branch in FY2026" refused twice: the HR phone (USB power, about 4 GB free) was killed for low
+  memory each time it loaded the 4 GB model on demand for its count. Now an owner compiles a pattern task's `expect`
+  block straight through its guarded compiler (`AggExecutor.intentOf`), so no pattern plan needs the owner's model;
+  the question answers in 0.3 s with HR's count. The eager load and the on-demand load are both skipped under
+  5 GB free (`AppWiring.MIN_FREE_FOR_LLM_BYTES`), which ends the kill loop; a free-form question on such a phone
+  says plainly that no model is loaded.
+- "create a pitch deck of the last 6 months of data" names no amount, so no pattern binds; it was offered the model's
+  knowledge, which is the wrong answer. It is now a refusal that says which amount to name, with the guide's hint.
+- A knowledge answer failed its schema check three times because the check ran on the GEN_TEXT envelope
+  (`{"op","value"}`) instead of the value; fixed in `SchemaValidator.check`.
+- "what does the HR access policy say about devices" went to HR's `devices` table instead of its policy document;
+  the direct planner now prefers the document when the question asks about documents and shares two words with a
+  title. Not re-run on the phones (the HR phone's model is needed for a document answer and stays unloaded there).
+
 ## Demo runbook
 
 Build: `tools/gradle.sh :app:assembleDebug -PhiveFeatures=all -PhiveDemoThermal`, then `adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk`.

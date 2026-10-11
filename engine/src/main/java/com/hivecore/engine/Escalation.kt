@@ -128,6 +128,8 @@ fun interface SchemaValidator {
      * table-recipe chunk failed "schema validation failed").
      */
     fun check(op: com.hivecore.core.Op, output: JsonElement, schema: JsonObject): String? {
+        // GEN_TEXT answers {"op", "value"}: the schema describes the value (the knowledge plan's {answer})
+        if (op == com.hivecore.core.Op.GEN_TEXT) return validate((output as? JsonObject)?.get("value") ?: return "no value", schema)
         if (op != com.hivecore.core.Op.LLM_MAP) return validate(output, schema)
         val items = (output as? JsonObject)?.get("items") as? kotlinx.serialization.json.JsonArray ?: return "no items"
         if (items.isEmpty()) return "no items"

@@ -450,6 +450,8 @@ class AskPortImpl(
     private val nameOf: (String) -> String,
     /** the pattern library, for the guide's account of what the swarm can plan (null = not loaded) */
     private val patterns: com.hivecore.planner.Patterns? = null,
+    /** the plan compiler, for the knowledge plan (null = the offer cannot be taken up) */
+    private val compiler: com.hivecore.planner.PlanCompilerImpl? = null,
 ) : AskPort {
     private class Held(val plan: TieredPlan, val catalogs: List<Catalog>, val recipe: RecipeDef?, val choice: ExecutionChoice? = null)
 
@@ -485,15 +487,23 @@ class AskPortImpl(
         val cats = catalogs()
         val tp = try { planner.plan(q, cats, caps()) } catch (e: Exception) { return PlanOptions.Refused(Refusal(e.message ?: "planning failed")) }
         val pq = tp.plan ?: run {
-            // spec 17: one plain sentence, and for a question the planner could not place at all, what to ask instead
+            // spec 17: one plain sentence; a picture that cannot be drawn stays a refusal, anything else is offered to the model's knowledge
             val sentence = tp.refusal ?: "That isn't a question the swarm can plan."
-            val hint = if (tp.tier == com.hivecore.planner.PlanTier.T0) " " + com.hivecore.engine.guide.SwarmGuide.hint(facts()) else ""
-            return PlanOptions.Refused(Refusal(sentence + hint, detail = tp.note))
+            // a deck or picture that cannot be made, or a deck with no amount named, stays a plain refusal with the guide's hint
+            if (sentence.startsWith("No phone of the swarm") || sentence.startsWith("I can't tell what to draw") || sentence.startsWith("A deck needs"))
+                return PlanOptions.Refused(Refusal(sentence + " " + com.hivecore.engine.guide.SwarmGuide.hint(facts()), detail = tp.note))
+            return PlanOptions.Offer(q, offerSentence(tp), detail = tp.note)
         }
         if (tp.clarification.isNotEmpty() || pq.confidence < Confidence.LOW) {
             val readings = tp.clarification.ifEmpty { listOf(q) }
             return PlanOptions.Clarify(q, readings, pq.confidence)
         }
+        return ready(q, tp, cats)
+    }
+
+    /** The compiled plan as the chat's options: steps with their phones, the LOCAL and CLOUD estimates, the suggested mode. */
+    private fun ready(q: String, tp: TieredPlan, cats: List<Catalog>): PlanOptions {
+        val pq = tp.plan ?: return PlanOptions.Refused(Refusal("the plan has no steps"))
         val compiled = tp.compiled ?: return PlanOptions.Refused(Refusal("the plan could not be compiled"))
         if (!compiled.ok) return PlanOptions.Refused(Refusal(compiled.check.errors.joinToString("; "), compiled.planHash))
         val choice = ExecutionOptions.compute(compiled, profiles(), catalogEntries(), prices(), policy().toPlanner(), online(), selfId)
@@ -525,6 +535,29 @@ class AskPortImpl(
             suggested = if (choice.default == ExecutionMode.CLOUD) RunMode.CLOUD else RunMode.LOCAL)
     }
 
+    /** Why the phones' data does not answer, then the offer (spec amendment "open paths"). */
+    private fun offerSentence(tp: TieredPlan): String {
+        val owners = tp.route.owners.map { if (it == selfId) selfName else nameOf(it) }
+        val why = when {
+            owners.isEmpty() -> "Nothing on your phones covers this: it names no table or document they hold."
+            tp.refusal != null && tp.tier != com.hivecore.planner.PlanTier.T0 -> "I couldn't work this out from the data on ${owners.joinToString(" and ")}: ${tp.refusal.orEmpty().trimEnd('.')}."
+            else -> "I couldn't turn this into steps over the data on ${owners.joinToString(" and ")}."
+        }
+        return "$why Shall I answer from the language model's own knowledge instead? It runs on your phones and nothing leaves them, but the answer is not checked against any data."
+    }
+
+    /** The user accepted the offer: one GEN_TEXT step on a phone with the language model, compiled and estimated like any plan. */
+    override suspend fun knowledge(question: String): PlanOptions {
+        val q = question.trim()
+        val pq = com.hivecore.planner.KnowledgePlan.of(q)
+        val cats = catalogs()
+        val c = compiler ?: return PlanOptions.Refused(Refusal("this build cannot answer from the model's own knowledge"))
+        val compiled = c.compile(pq.dag, cats, "", caps().capabilities, caps().ops, selfId)
+        if (!compiled.ok) return PlanOptions.Refused(Refusal("No phone can answer from the model right now: " + compiled.check.errors.joinToString("; ")))
+        val tp = TieredPlan(com.hivecore.core.RouteDecision(false, emptyList(), emptyList(), "knowledge"), com.hivecore.planner.PlanTier.T1, pq, compiled, note = "the model's own knowledge")
+        return ready(q, tp, cats)
+    }
+
     private fun recipeFor(q: String): RecipeDef? {
         val id = q.removePrefix("recipe:").trim()
         return recipes().firstOrNull { it.id.equals(id, ignoreCase = true) || it.title.equals(q, ignoreCase = true) }
@@ -541,7 +574,7 @@ class AskPortImpl(
                 is AskProgress.Status -> emit(AskEvent.Status(p.text))
                 is AskProgress.Heard -> Unit
                 is AskProgress.Done -> when (val o = p.outcome) {
-                    is AskOutcome.Answer -> emit(AskEvent.Answered(answer(plan, mode, o)))
+                    is AskOutcome.Answer -> emit(AskEvent.Answered(answer(plan, mode, o, com.hivecore.planner.KnowledgePlan.isKnowledge(pq.dag))))
                     is AskOutcome.Refusal -> emit(AskEvent.Refused(Refusal(o.reasons.joinToString("; ") { (who, why) -> if (who == selfName) why else "$who: $why" }, plan.planHash)))
                     is AskOutcome.NoNode -> emit(AskEvent.Refused(Refusal("no phone holds the data this question needs", plan.planHash)))
                 }
@@ -563,7 +596,7 @@ class AskPortImpl(
             plan.steps.map { it.copy(cloud = p.cloud.isNotEmpty()) }, RunMode.LOCAL, jobId = p.jobId, elapsedMs = p.elapsedMs)))
     }
 
-    private fun answer(plan: AskPlan, mode: RunMode, a: AskOutcome.Answer): AskAnswer {
+    private fun answer(plan: AskPlan, mode: RunMode, a: AskOutcome.Answer, knowledge: Boolean = false): AskAnswer {
         val summary = a.plan
         val steps = plan.steps.mapIndexed { i, s ->
             val line = summary?.lines?.getOrNull(i).orEmpty()
@@ -575,8 +608,9 @@ class AskPortImpl(
             else -> AnswerBadge.UNVERIFIED
         }
         return AskAnswer(UUID.randomUUID().toString(), summary?.planHash ?: plan.planHash, a.text, a.provenance, badge, steps, mode,
-            notes = a.notes, elapsedMs = a.timing.totalMs ?: 0L, deck = com.hivecore.engine.deck.Deck.fromJson(a.artifact),
-            picture = com.hivecore.engine.picture.Picture.fromJson(a.artifact))
+            notes = (if (knowledge) listOf("answered from the language model's own knowledge on your phone, not from your data; nothing left the phones") else emptyList()) + a.notes,
+            elapsedMs = a.timing.totalMs ?: 0L, deck = com.hivecore.engine.deck.Deck.fromJson(a.artifact),
+            picture = com.hivecore.engine.picture.Picture.fromJson(a.artifact), chart = com.hivecore.engine.chart.ChartArtifact.fromJson(a.artifact))
     }
 
     override fun notAccurate(answer: AskAnswer, stepId: String?): Flow<AskEvent> = flow {

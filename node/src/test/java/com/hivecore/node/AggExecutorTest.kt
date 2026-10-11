@@ -42,6 +42,25 @@ class AggExecutorTest {
         assertEquals("HR", t.node)
     }
 
+    @Test fun aPatternTasksExpectCompilesWithoutTheModel() = runTest {
+        // the per_unit pattern's HR step: count employees by region, with the planner's expect block and no model call
+        val t = TaskSpec("b", Op.AGG, buildJsonObject {
+            put("q", "number of rep by region")
+            put("expect", buildJsonObject { put("table", "employees"); put("metric", "count"); put("measure", kotlinx.serialization.json.JsonNull)
+                put("dims", kotlinx.serialization.json.JsonArray(listOf(kotlinx.serialization.json.JsonPrimitive("region")))) })
+        }, owner = "hr")
+        val q = agg.intentOf(t)!!
+        assertEquals("employees", q.intent.table); assertEquals("count", q.intent.metric); assertEquals(listOf("region"), q.intent.groupBy)
+        prepared["b"] = PreparedTask.Agg(q)
+        val out = Canon.decodeTable(agg.execute(t, emptyList(), emptyList()).getOrThrow())
+        assertEquals(listOf("region", "n"), out.columns)
+        // a confidential measure keeps the compiler's rule: a sum of salary is refused, so the model path is tried instead
+        val bad = TaskSpec("c", Op.AGG, buildJsonObject { put("q", "total salary by region")
+            put("expect", buildJsonObject { put("table", "employees"); put("metric", "sum"); put("measure", "salary")
+                put("dims", kotlinx.serialization.json.JsonArray(listOf(kotlinx.serialization.json.JsonPrimitive("region")))) }) }, owner = "hr")
+        assertEquals(null, agg.intentOf(bad))
+    }
+
     @Test fun unknownSubQuestionIsRefused() = runTest {
         val r = agg.compileAgg("the weather")
         assertFalse(r.isSuccess)

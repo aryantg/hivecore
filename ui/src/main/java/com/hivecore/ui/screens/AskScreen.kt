@@ -86,7 +86,8 @@ fun AskRoute(vm: AskViewModel, onOpenJob: (String) -> Unit = {}, onOpenRecipe: (
         onNotAccurate = { item, step -> vm.notAccurate(item, step) }, onToggleSteps = vm::toggleSteps, onOpenJob = vm::openJob,
         onClearError = vm::clearError, onClearHistory = vm::clearHistory, onDismissMessage = vm::dismissMessage,
         onSuggestion = vm::useSuggestion, onAttach = { onOpenRecipe("photo_text") }, statusLine = statusLine,
-        onPresent = vm::present, onCloseDeck = vm::closeDeck, onOpenFile = { vm.openFile(it) }, onShareFile = { vm.shareFile(it) })
+        onPresent = vm::present, onCloseDeck = vm::closeDeck, onOpenFile = { vm.openFile(it) }, onShareFile = { vm.shareFile(it) },
+        onAcceptOffer = vm::acceptOffer, onDeclineOffer = vm::declineOffer)
 }
 
 @Composable
@@ -111,6 +112,8 @@ fun AskScreen(
     onCloseDeck: () -> Unit = {},
     onOpenFile: ((String) -> Unit)? = null,
     onShareFile: ((String) -> Unit)? = null,
+    onAcceptOffer: () -> Unit = {},
+    onDeclineOffer: () -> Unit = {},
 ) {
     val thread = state.thread
     state.presenting?.let { DeckSheet(it, onOpenFile, onShareFile, onClose = onCloseDeck) }
@@ -118,7 +121,7 @@ fun AskScreen(
     val last = thread.lastOrNull()
     val lastStatus = (last as? ChatTurn.Plan)?.running?.second ?: (last as? ChatTurn.Typing)?.status
     LaunchedEffect(thread.size, last?.key, lastStatus) { if (thread.isNotEmpty()) listState.animateScrollToItem(thread.lastIndex) }
-    val choosingOrBusy = state.busy || state.phase is AskViewModel.Phase.Choosing || state.phase is AskViewModel.Phase.Clarifying
+    val choosingOrBusy = state.busy || state.phase is AskViewModel.Phase.Choosing || state.phase is AskViewModel.Phase.Clarifying || state.phase is AskViewModel.Phase.Offering
 
     HiveScreen(
         Screen.ASK, modifier,
@@ -146,6 +149,7 @@ fun AskScreen(
                     is ChatTurn.User -> UserBubble(t.text)
                     is ChatTurn.Typing -> SwarmTurn { TypingIndicator(t.status) }
                     is ChatTurn.Clarify -> SwarmTurn { ClarifyBody(t.clarify, onReading) }
+                    is ChatTurn.Offer -> SwarmTurn { OfferBody(t.offer, onAcceptOffer, onDeclineOffer) }
                     is ChatTurn.Plan -> SwarmTurn { PlanBody(t.options, t.running, onChoose) }
                     is ChatTurn.Answer -> SwarmTurn {
                         AnswerBody(t.item, t.answer, expanded = t.item.id in state.expandedSteps, reRunning = state.reRunningId == t.answer.answerId,
@@ -191,6 +195,17 @@ private fun Greeting(statusLine: String?, suggestions: List<Suggestion>, onSugge
             }
         }
     }
+}
+
+/** The offer (spec amendment "open paths"): why nothing on the phones covers it, and the yes / no to the model's own knowledge. */
+@Composable
+private fun OfferBody(o: PlanOptions.Offer, onAccept: () -> Unit, onDecline: () -> Unit) {
+    Text(o.sentence, style = MaterialTheme.typography.bodyLarge)
+    StatusPill("not from your data", Tone.Warn, icon = HiveIcons.info)
+    ActionRow(
+        primary = HiveAction("Use the model's knowledge", HiveIcons.ask, onClick = onAccept),
+        secondaries = listOf(HiveAction("No, leave it", HiveIcons.close, onClick = onDecline)),
+    )
 }
 
 @Composable
@@ -257,6 +272,7 @@ fun AnswerBody(item: AskViewModel.HistoryItem, a: AskAnswer, expanded: Boolean, 
     Text(a.text, style = MaterialTheme.typography.bodyLarge)
     a.deck?.let { d -> DeckCard(d, onPresent = { onPresent(d) }, onOpenFile = onOpenFile, onShareFile = onShareFile) }
     a.picture?.let { p -> PictureCard(p, onOpenFile = onOpenFile, onShareFile = onShareFile) }
+    a.chart?.let { c -> ChartCard(c) }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(HiveSpacing.xs), verticalArrangement = Arrangement.spacedBy(HiveSpacing.xs)) {
         when (a.badge) {
             AnswerBadge.VERIFIED -> StatusPill("verified", Tone.Ok, icon = HiveIcons.check)

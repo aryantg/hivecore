@@ -53,11 +53,44 @@ class AggExecutor(
     fun questionOf(task: TaskSpec): String? = (task.params["q"] as? JsonPrimitive)?.content?.trim()?.takeIf { it.isNotEmpty() }
 
     /**
+     * A pattern plan's AGG task carries `expect` (table, metric, measure, dims, period): the intent in full, written by
+     * the planner from this phone's own catalog. It compiles straight through the guarded compiler, so a pattern plan
+     * never needs this phone's language model (spec amendment "open paths"; the HR phone cannot hold the 4 GB model
+     * while asleep). Null when the task has no usable `expect`; the caller then asks the model.
+     */
+    fun intentOf(task: TaskSpec, s: Schema = schema.schema()): Compiled.Query? {
+        val e = task.params["expect"] as? kotlinx.serialization.json.JsonObject ?: return null
+        fun str(k: String) = (e[k] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
+        val table = str("table") ?: return null
+        val metric = str("metric") ?: "sum"
+        val measure = str("measure")
+        val dims = (e["dims"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
+        val t = s.tables.firstOrNull { it.name == table } ?: return null
+        val filters = ArrayList<com.hivecore.core.Filter>()
+        (e["period"] as? kotlinx.serialization.json.JsonObject)?.let { p ->
+            val gte = (p["gte"] as? JsonPrimitive)?.content; val lte = (p["lte"] as? JsonPrimitive)?.content
+            if (gte != null && lte != null && t.columns.any { it.name == "month" }) {
+                filters += com.hivecore.core.Filter("month", "gte", JsonPrimitive(gte)); filters += com.hivecore.core.Filter("month", "lte", JsonPrimitive(lte))
+            }
+        }
+        val intent = com.hivecore.core.Intent(table, metric, measure, dims, filters)
+        return when (val c = compiler.compile(intent, s)) {
+            is Compiled.Query -> c.also { SLog.d(TAG, "$nodeName: ${task.id} compiled from the plan's expect: ${it.signature}") }
+            else -> null
+        }
+    }
+
+    /**
      * Compiles one AGG sub-question to exactly one query (the planner's first intent that compiles; extra intents of a
      * multi-part answer are dropped and logged). Failure messages are the refusal shown to the commander.
      */
     suspend fun compileAgg(question: String, s: Schema = schema.schema()): Result<Compiled.Query> {
-        val pr = planner.plan(question, s).getOrElse { return Result.failure(IllegalStateException("could not understand '$question'")) }
+        val pr = planner.plan(question, s).getOrElse { e ->
+            val why = e.message.orEmpty()
+            return Result.failure(IllegalStateException(if (why.contains("no model loaded"))
+                "$nodeName has no language model loaded right now (not enough free memory), so it cannot read '$question'"
+                else "could not understand '$question'"))
+        }
         if (pr.intents.notRelevant || pr.intents.intents.isEmpty())
             return Result.failure(IllegalStateException("$nodeName holds nothing about '$question'"))
         var refusal: String? = null

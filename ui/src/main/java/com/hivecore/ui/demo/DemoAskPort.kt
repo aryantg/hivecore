@@ -89,6 +89,11 @@ class DemoAskPort(
         return PlanOptions.Ready(plan, s.local, s.cloud, cloudBlockedReason = if (s.cloud == null) "the commission column is private on HR's phone" else null)
     }
 
+    override suspend fun knowledge(question: String): PlanOptions {
+        delay(d(PLAN_MS))
+        return FakeAskPort.defaultKnowledge(question)
+    }
+
     override fun run(plan: AskPlan, mode: RunMode): Flow<AskEvent> = flow {
         val s = scripts[plan.request.lowercase()]
         if (s == null) { FakeAskPort.defaultRun(plan, mode).forEach { delay(d(STEP_MS)); emit(it) }; return@flow }

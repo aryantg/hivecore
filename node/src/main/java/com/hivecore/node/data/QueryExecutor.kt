@@ -29,8 +29,11 @@ import kotlinx.serialization.json.JsonPrimitive
  * sum or avg of a column the rollup holds. The answer is then re-aggregated from the rollup, `source = "rollup"`.
  */
 class SqlQueryExecutor(private val db: SqlDb, private val chip: () -> AnswerChip = { AnswerChip.LLM }) : QueryExecutor {
+    private val values = FilterValues(db)
 
-    override fun run(q: Compiled.Query, table: TableDef, node: String): NodeOutcome {
+    override fun run(q0: Compiled.Query, table: TableDef, node: String): NodeOutcome {
+        // the intent model's filter values snap to the column's stored values ("2026" → "FY2026") before anything runs
+        val q = runCatching { values.resolve(q0, table) }.getOrDefault(q0)
         val hash = Hashing.sha256Hex(q.signature)
         val title = IntentText.title(q.intent)
         val perPerson = RuleIntentCompiler.floorColumns(table).isNotEmpty()

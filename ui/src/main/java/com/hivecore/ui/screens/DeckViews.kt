@@ -181,7 +181,7 @@ private fun Bullet(text: String, style: androidx.compose.ui.text.TextStyle, fg: 
 
 /** Bars by weight, the figure above and the category below each; the last bar is the accent, the rest a muted version. */
 @Composable
-private fun BarChart(c: Chart, modifier: Modifier, compact: Boolean, fg: androidx.compose.ui.graphics.Color, accent: androidx.compose.ui.graphics.Color) {
+internal fun BarChart(c: Chart, modifier: Modifier, compact: Boolean, fg: androidx.compose.ui.graphics.Color, accent: androidx.compose.ui.graphics.Color) {
     val max = c.values.maxOrNull()?.takeIf { it > 0 } ?: 1.0
     val style = if (compact) HiveTextStyles.count else MaterialTheme.typography.labelMedium
     Row(modifier.semantics { contentDescription = c.categories.indices.joinToString("; ") { i -> "${c.categories[i]} ${c.labels.getOrNull(i) ?: c.values[i]}" } },

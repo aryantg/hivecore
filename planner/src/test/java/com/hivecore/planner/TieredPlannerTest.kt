@@ -77,7 +77,8 @@ class TieredPlannerTest {
         // the model answers "none of these fits" for every pattern: T1 has no pattern, so T2 is asked
         val llm = FakeLlmEngine().apply { replies["which plan fits"] = "none" }
         val t2 = ScriptedT2(Result.failure(IllegalStateException("the cloud planner's graph was rejected twice: 'x' reads missing input")))
-        val p = facade(llm, t2).plan("Revenue per rep by region this year", catalogs, caps)
+        // (a question with several compatible patterns: a single cue-chosen one is never vetoed by the model)
+        val p = facade(llm, t2).plan("Which region has the highest revenue per rep this year?", catalogs, caps)
         assertEquals(PlanTier.T1, p.tier)
         assertNull(p.plan)
         assertNotNull(p.refusal)
@@ -98,6 +99,15 @@ class TieredPlannerTest {
         assertTrue("the picture's 'image' names image.gen, which the patterns cover, so T2 is not asked", t2.calls.isEmpty())
         assertEquals(setOf("image.gen"), CapabilityCues.named("Create an image of my team"))
         assertEquals(setOf("vlm"), CapabilityCues.named("What is in this photo?"))
+    }
+
+    @Test fun aCueChosenPatternIsNotVetoedByTheModel() = runTest {
+        // the model answers "none" to everything; the picture cue still picks make_image ("a penguin drinking tea")
+        val llm = FakeLlmEngine().apply { replies["which plan fits"] = "none" }
+        val p = facade(llm).plan("Create an image of a penguin drinking tea", catalogs, caps)
+        assertTrue(p.refusal ?: "", p.ok)
+        assertEquals("make_image", p.plan!!.dag.patternId)
+        assertEquals("a penguin drinking tea", (p.plan!!.dag.tasks.last().params["subject"] as kotlinx.serialization.json.JsonPrimitive).content)
     }
 
     @Test fun aQuestionAboutAPhonesDataWithoutACueIsRefusedInPlainWords() = runTest {

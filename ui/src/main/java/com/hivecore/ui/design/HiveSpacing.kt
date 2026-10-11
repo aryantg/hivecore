@@ -13,6 +13,7 @@ object HiveSpacing {
     val border = 1.dp; val borderSelected = 2.dp; val progressThin = 6.dp; val spinnerSm = 12.dp; val spinner = 18.dp
     val suggestionMinHeight = 96.dp; val composerMinHeight = 52.dp; val fabClearance = 88.dp
     val iconXs = 14.dp; val pillH = 10.dp; val presence = 11.dp; val maxContent = 720.dp; val tableCell = 140.dp; val slideThumb = 168.dp
+    val chart = 200.dp; val chartStroke = 3.dp; val chartPoint = 5.dp
     const val QR_FRACTION = 0.8f
     const val BUBBLE_MAX_FRACTION = 0.82f
 }

@@ -36,10 +36,9 @@ class PlannerImplTest {
         assertEquals(SALES, a.owner); assertEquals("Revenue by region this year", a.params["q"]!!.jsonPrimitive.content)
         assertEquals(HR, b.owner); assertEquals("number of rep by region", b.params["q"]!!.jsonPrimitive.content)
         assertEquals(Op.RATIO, ratio.op)
-        // only the pattern choice used the model: k = 3 runs; every slot had exactly one grounded candidate
-        assertEquals(3, llm.calls.size)
-        assertTrue(llm.calls[0].first.last().content.contains("per_unit: "))
-        assertTrue(llm.calls[0].first.last().content.contains("none: "))
+        // the one compatible pattern is the cue's own (per → RATIO → per_unit), so no model call chose it, and every
+        // slot had exactly one grounded candidate: the plan is deterministic
+        assertEquals(0, llm.calls.size)
     }
 
     @Test fun slotChoiceGoesThroughTheChooser() = runTest {
@@ -53,7 +52,9 @@ class PlannerImplTest {
         val (a, b) = r.dag.tasks
         assertEquals(ACCOUNTS, a.owner); assertEquals("total spend October", a.params["q"]!!.jsonPrimitive.content)
         assertEquals(SALES, b.owner); assertEquals("total revenue October", b.params["q"]!!.jsonPrimitive.content)
-        assertEquals(6, llm.calls.size)
+        // the cue chose compare_two; only the measure slot asked the model (k = 3 runs), with "none" offered
+        assertEquals(3, llm.calls.size)
+        assertTrue(llm.calls[0].first.last().content.contains("spend (invoices.total on Accounts)"))
     }
 
     @Test fun splitVotesReturnAClarification() = runTest {
@@ -126,9 +127,9 @@ class PlannerImplTest {
         val r = planner(llm).plan("Forecast next year's revenue", route(owners = listOf(SALES)), catalogs)
         assertTrue(r.exceptionOrNull()!!.message!!.contains("It can answer"))
         assertEquals(0, llm.calls.size)
-        // the model answering "none" is the same refusal
+        // the model answering "none" among several compatible patterns is the same refusal (one cue-chosen pattern is never vetoed)
         val none = FakeLlmEngine().apply { replies["which plan fits"] = "none" }
-        val r2 = planner(none).plan("Revenue per rep by region", route("per" to Op.RATIO), catalogs)
+        val r2 = planner(none).plan("Which region has the highest revenue per rep?", route("per" to Op.RATIO, "highest" to Op.RANK), catalogs)
         assertTrue(r2.exceptionOrNull()!!.message!!.contains("It can answer"))
     }
 

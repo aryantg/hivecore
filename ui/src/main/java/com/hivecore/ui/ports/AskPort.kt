@@ -1,6 +1,7 @@
 package com.hivecore.ui.ports
 
 import com.hivecore.core.Provenance
+import com.hivecore.engine.chart.ChartArtifact
 import com.hivecore.engine.deck.Deck
 import com.hivecore.engine.picture.Picture
 import kotlinx.coroutines.flow.Flow
@@ -79,6 +80,12 @@ sealed interface PlanOptions {
      * the catalog and the capability summary by `SwarmGuide`: no plan, no run, no model.
      */
     data class Answered(val answer: AskAnswer) : PlanOptions
+
+    /**
+     * Nothing on the phones covers the question (spec amendment "open paths"): the swarm asks before answering from a
+     * model's own knowledge. [sentence] says why and what that means; [AskPort.knowledge] plans it when the user agrees.
+     */
+    data class Offer(val question: String, val sentence: String, val detail: String? = null) : PlanOptions
 }
 
 /** The answer card: text, provenance per phone, badge, and the steps (cloud ones flagged) for "not accurate". */
@@ -99,6 +106,8 @@ data class AskAnswer(
     val deck: Deck? = null,
     /** the illustration a picture plan produced (spec amendment "pictures"): shown under the answer, with Open / Share */
     val picture: Picture? = null,
+    /** the chart a chart step drew from an owner's table (spec amendment "open paths") */
+    val chart: ChartArtifact? = null,
 ) {
     val cloudSteps: List<PlanStepView> get() = steps.filter { it.cloud }
 }
@@ -120,6 +129,12 @@ sealed interface AskEvent {
 interface AskPort {
     /** Plans the request (T0/T1 under 2 s, spec section 17 flows). Never throws for a bad request: returns [PlanOptions.Refused]. */
     suspend fun plan(request: String): PlanOptions
+
+    /**
+     * The user accepted a [PlanOptions.Offer]: plans the question as one on-device language-model step that answers from
+     * the model's own knowledge (unverified, nothing leaves the phones). Returns the plan's options like [plan].
+     */
+    suspend fun knowledge(question: String): PlanOptions
 
     /** Runs a planned request in [mode]; the flow ends after one [AskEvent.Answered] or [AskEvent.Refused]. */
     fun run(plan: AskPlan, mode: RunMode): Flow<AskEvent>

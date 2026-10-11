@@ -188,6 +188,8 @@ object AppWiring {
     const val PREF_GROUP_ID = "group_id"
     const val PREF_TRANSPORT = "transport"
     const val PREF_T2_FIRST = "t2_first"
+    /** free memory an on-demand load of the 4 GB NPU bundle needs; below it the phone gate's low-memory kill loop returns */
+    const val MIN_FREE_FOR_LLM_BYTES = 5L shl 30
     const val PREF_TIME_BUDGET_TRIGGER = "trigger_time_budget"
     const val DEFAULT_GROUP = "home"
 
@@ -233,7 +235,15 @@ object AppWiring {
         var ort: com.hivecore.core.ModelRuntime? = null
         if (Features.runtime) {
             val engine = GenieXEngine(app)
-            llm = engine
+            // after a low-memory exit the eager load is skipped; the first question then loads the model on demand
+            // (the phone gate: a 4 GB load into less free memory than that gets the app killed, so the guard keeps it unloaded)
+            llm = com.hivecore.runtime.llm.LazyLlmEngine(engine, mayLoad = {
+                val am = app.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                val mi = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+                val ok = mi.availMem >= MIN_FREE_FOR_LLM_BYTES
+                if (!ok) SLog.w(TAG, "LLM not loaded on demand: ${mi.availMem / (1 shl 20)} MB free, ${MIN_FREE_FOR_LLM_BYTES / (1 shl 20)} MB needed")
+                ok
+            })
             catalog = ModelCatalogLoader.android(app).load()
             val reg = ModelRegistryImpl(ModelRegistryImpl.defaultRoots(app), File(app.filesDir, "hash_cache.json"), File(app.filesDir, "warm_cache.json"))
             registry = reg
@@ -252,6 +262,11 @@ object AppWiring {
                 // brought it back, the eager 4 GB LLM load started again and the next kill came ~40 s later, in a loop.
                 // After a low-memory exit the LLM is left to load on demand (MODEL_REQ).
                 if (lastExitWasLowMemory(app)) { warn("last exit was low memory: the LLM loads on demand"); return@launch }
+                // a phone without the free memory for the 4 GB bundle keeps it unloaded: pattern plans compile from their
+                // expect block without it, and the first free-form question says plainly that no model is loaded
+                val am = app.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                val mi = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+                if (mi.availMem < MIN_FREE_FOR_LLM_BYTES) { warn("${mi.availMem / (1 shl 20)} MB free: the LLM loads on demand"); return@launch }
                 val avail = runCatching { engine.available() }.getOrDefault(emptySet())
                 val pick = listOf(LlmBackend.NPU, LlmBackend.GPU, LlmBackend.CPU).firstOrNull { it in avail }
                 if (pick == null) warn("no LLM bundle found under ${GenieXEngine.defaultRoots(app).joinToString { it.name }}")
@@ -595,10 +610,12 @@ object AppWiring {
             ModelsPortImpl(selfId, selfName(), { catalog }, pool, registry, capBench, benchTable, profiles, nameOf, prefs, scope,
                 downloader = ModelDownloader(ModelRegistryImpl.defaultRoots(app)) { (registry as? ModelRegistryImpl)?.refresh() }) else FakeModelsPort.sample()
         val tiered = if (Features.graph && patterns != null) TieredPlannerImpl(selfId, SwarmRouterImpl(), PlannerImpl(chooser, patterns, clock, availableOps = { registeredOps.value }), compiler, t2,
-            t2First = { prefs.getBoolean(PREF_T2_FIRST, false) }, clock = clock, patterns = patterns) else null
+            t2First = { prefs.getBoolean(PREF_T2_FIRST, false) }, clock = clock, patterns = patterns,
+            // the open paths: the phone's own model writes a graph for a cued question no pattern fits; one step per phone otherwise
+            localGraph = com.hivecore.planner.LocalGraphPlanner(llm, compiler, selfId), direct = com.hivecore.planner.DirectPlanner()) else null
         val askPort = if (tiered != null) AskPortImpl(selfId, selfName(), tiered, node, node, { graph.catalogs() },
             { CapabilitySummary(catalog.capabilities + runtimeCaps(router, selfId), registeredOps.value) }, profiles, { catalog.entries }, prices,
-            { AskPortImpl.policyOf(prefs) }, { runCatching { cm?.activeNetwork != null }.getOrDefault(false) }, recipes, escalator, nameOf, patterns) else FakeAskPort()
+            { AskPortImpl.policyOf(prefs) }, { runCatching { cm?.activeNetwork != null }.getOrDefault(false) }, recipes, escalator, nameOf, patterns, compiler) else FakeAskPort()
         val settingsPort = if (Features.meshTrust || Features.cloud) SettingsPortImpl(keyStore, peerStore, router, ledger, File(app.filesDir, "exports"))
             else FakeSettingsPort()
         val jobRunner: JobRunner = if (Features.split) node else com.hivecore.core.fakes.FakeJobRunner()

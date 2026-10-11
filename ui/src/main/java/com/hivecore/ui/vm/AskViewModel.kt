@@ -42,6 +42,8 @@ class AskViewModel(
         /** The plan panel with the choice; nothing runs yet. */
         data class Choosing(val options: PlanOptions.Ready) : Phase
         data class Clarifying(val clarify: PlanOptions.Clarify) : Phase
+        /** Nothing on the phones covers it: the offer to answer from the model's own knowledge waits for a yes or no. */
+        data class Offering(val offer: PlanOptions.Offer) : Phase
         data class Running(val plan: AskPlan, val mode: RunMode, val status: String, val options: PlanOptions.Ready?) : Phase
         data class Error(val message: String) : Phase
     }
@@ -122,6 +124,7 @@ class AskViewModel(
             }
             when (options) {
                 is PlanOptions.Answered -> record(q, Outcome.Answer(options.answer), null)
+                is PlanOptions.Offer -> _state.update { it.copy(phase = Phase.Offering(options)) }
                 is PlanOptions.Refused -> record(q, Outcome.Refused(options.refusal), null)
                 is PlanOptions.Clarify -> _state.update { it.copy(phase = Phase.Clarifying(options)) }
                 is PlanOptions.Ready -> {
@@ -149,10 +152,40 @@ class AskViewModel(
         submit()
     }
 
+    /** The user said yes to answering from the model's own knowledge: plan the one-step run, then start per the policy. */
+    fun acceptOffer() {
+        val offer = (_state.value.phase as? Phase.Offering)?.offer ?: return
+        _state.update { it.copy(phase = Phase.Planning, message = null) }
+        SLog.d(TAG, "knowledge: ${offer.question}")
+        job = scope.launch {
+            val options = try { port.knowledge(offer.question) } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                SLog.e(TAG, "knowledge plan failed", e)
+                _state.update { it.copy(phase = Phase.Error("Planning failed: ${e.message ?: e.javaClass.simpleName}")) }
+                return@launch
+            }
+            when (options) {
+                is PlanOptions.Ready -> {
+                    val pick = defaultMode(_state.value.policy, options)
+                    if (pick == null) _state.update { it.copy(phase = Phase.Choosing(options)) } else start(options, pick)
+                }
+                is PlanOptions.Refused -> record(offer.question, Outcome.Refused(options.refusal), null)
+                is PlanOptions.Answered -> record(offer.question, Outcome.Answer(options.answer), null)
+                is PlanOptions.Clarify -> _state.update { it.copy(phase = Phase.Clarifying(options)) }
+                is PlanOptions.Offer -> record(offer.question, Outcome.Refused(Refusal(options.sentence, detail = options.detail)), null)
+            }
+        }
+    }
+
+    /** The user said no: the exchange ends with the offer's sentence as a plain refusal. */
+    fun declineOffer() {
+        val offer = (_state.value.phase as? Phase.Offering)?.offer ?: return
+        record(offer.question, Outcome.Refused(Refusal("Nothing ran: the question isn't covered by your phones' data, and the model's own knowledge was not used.", detail = offer.detail)), null)
+    }
+
     fun cancel() {
         job?.cancel(); job = null
         _state.update {
-            if (it.busy || it.phase is Phase.Choosing || it.phase is Phase.Clarifying)
+            if (it.busy || it.phase is Phase.Choosing || it.phase is Phase.Clarifying || it.phase is Phase.Offering)
                 it.copy(phase = Phase.Idle, request = it.request.ifEmpty { it.inFlight.orEmpty() }, inFlight = null)
             else it
         }

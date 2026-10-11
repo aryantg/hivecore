@@ -13,6 +13,8 @@ sealed interface ChatTurn {
     /** Working, with the live status line ("Planning…", "Placing 3 steps…"). */
     data class Typing(val status: String?, override val key: String) : ChatTurn
     data class Clarify(val clarify: PlanOptions.Clarify, override val key: String) : ChatTurn
+    /** The offer to answer from the model's own knowledge, with its yes and no. */
+    data class Offer(val offer: PlanOptions.Offer, override val key: String) : ChatTurn
     /** The plan card with the LOCAL / CLOUD choice; [running] is the chosen mode and its status once started. */
     data class Plan(val options: PlanOptions.Ready, val running: Pair<RunMode, String>?, override val key: String) : ChatTurn
     data class Answer(val item: AskViewModel.HistoryItem, val answer: AskAnswer, override val key: String) : ChatTurn
@@ -36,6 +38,7 @@ object ChatThread {
             AskViewModel.Phase.Idle -> Unit
             AskViewModel.Phase.Planning -> add(ChatTurn.Typing("Planning across your phones…", "s-live"))
             is AskViewModel.Phase.Clarifying -> add(ChatTurn.Clarify(p.clarify, "s-live"))
+            is AskViewModel.Phase.Offering -> add(ChatTurn.Offer(p.offer, "s-live"))
             is AskViewModel.Phase.Choosing -> add(ChatTurn.Plan(p.options, null, "s-live"))
             is AskViewModel.Phase.Running -> {
                 val o = p.options

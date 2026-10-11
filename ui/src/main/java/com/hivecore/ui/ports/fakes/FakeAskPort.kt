@@ -26,6 +26,13 @@ class FakeAskPort(var delayMs: Long = 0) : AskPort {
     val notAccurateCalls = mutableListOf<Pair<String, String?>>()
 
     var planFor: (String) -> PlanOptions = { defaultPlan(it) }
+    var knowledgeFor: (String) -> PlanOptions = { defaultKnowledge(it) }
+
+    override suspend fun knowledge(question: String): PlanOptions {
+        planned += "knowledge:$question"
+        if (delayMs > 0) delay(delayMs)
+        return knowledgeFor(question)
+    }
     var runFor: (AskPlan, RunMode) -> List<AskEvent> = { plan, mode -> defaultRun(plan, mode) }
     var notAccurateFor: (AskAnswer, String?) -> List<AskEvent> = { a, step -> defaultNotAccurate(a, step) }
 
@@ -76,6 +83,12 @@ class FakeAskPort(var delayMs: Long = 0) : AskPort {
                 }
             }
         }
+
+        /** The knowledge plan: one GEN_TEXT step on this phone, LOCAL only. */
+        fun defaultKnowledge(question: String): PlanOptions = PlanOptions.Ready(
+            AskPlan("plan-k-${++seq}", "k9f2c41ab77e0d3c5", question, listOf(PlanStepView("g", "GEN_TEXT", "here", 6_000)), 1.0, "T1"),
+            local = ModeEstimate(RunMode.LOCAL, 6_000, 0.0, "nothing leaves the phones", 1, "qwen3-4b on this phone, from its own knowledge"),
+            cloud = null, cloudBlockedReason = "an answer from the model's own knowledge stays on the phones")
 
         fun defaultRun(plan: AskPlan, mode: RunMode): List<AskEvent> = listOf(
             AskEvent.Status("Placing ${plan.steps.size} steps…"),

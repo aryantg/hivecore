@@ -22,8 +22,8 @@ data class CapabilitySummary(
     }
 }
 
-/** The planner tier that produced a plan (spec 7.2). */
-enum class PlanTier { T0, T1, T2 }
+/** The planner tier that produced a plan (spec 7.2; T1G = the on-device graph planner of the "open paths" amendment). */
+enum class PlanTier { T0, T1, T1G, T2 }
 
 /**
  * The outcome of [TieredPlanner.plan]: the T0 route, the plan (null when no tier produced one), its compilation and
@@ -76,6 +76,10 @@ class TieredPlannerImpl(
     private val cache: PlanCache? = PlanCache(),
     private val patterns: Patterns? = null,
     private val clarifyWindowMs: Long = CLARIFY_WINDOW_MS,
+    /** the on-device graph planner (tier T1G): asked when the question carries cues but no pattern fits */
+    private val localGraph: T2Planner? = null,
+    /** the direct plan: one aggregate per phone whose data the question names, when no pattern or graph fits */
+    private val direct: DirectPlanner? = null,
 ) : TieredPlanner {
 
     @Volatile private var lastClarificationAt: Long? = null
@@ -100,7 +104,18 @@ class TieredPlannerImpl(
             SLog.w(TAG, "T2 first failed (${r.note}); local tiers")
         }
         val t1Result: Result<PlannedQuestion>? = if (route.composite) t1.plan(question, route, catalogs) else null
-        val local = fromT1(route, t1Result, catalogs, caps)
+        var local = fromT1(route, t1Result, catalogs, caps)
+        // T1G: the question carries cues (it composes) but the library has nothing for it: the phone's model writes the graph
+        if (local.plan == null && localGraph != null && route.composite && route.owners.isNotEmpty()) {
+            val g = runT2(localGraph, question, catalogs, caps, PlanTier.T1G)
+            if (g.plan != null && g.compiled?.ok == true) return remember(key, g.copy(note = "on-device graph planner"))
+            SLog.d(TAG, "T1G failed (${g.note})")
+            local = local.copy(note = listOfNotNull(local.note, "on-device graph planner: ${g.note ?: "no graph"}").joinToString("; "))
+        }
+        // the direct plan: one aggregate (or document answer) per phone whose data the question names
+        if (local.plan == null && direct != null) direct.plan(question, route, catalogs)?.let { pq ->
+            local = TieredPlan(route, PlanTier.T1, pq, compile(pq, catalogs, caps), note = listOfNotNull(local.note, "direct plan: one step per phone").joinToString("; "))
+        }
         val why = if (cloud == null || t2First()) null else t2Reason(question, route, t1Result)
         if (cloud == null || why == null) return remember(key, local)
         SLog.d(TAG, "T2: $why")
@@ -128,8 +143,10 @@ class TieredPlannerImpl(
     }
 
     private fun fromT1(route: RouteDecision, t1: Result<PlannedQuestion>?, catalogs: List<Catalog>, caps: CapabilitySummary): TieredPlan {
-        if (t1 == null) return TieredPlan(route, PlanTier.T0, note = route.reason, refusal = if (route.owners.isEmpty())
-            "That isn't about the data on your phones, and it doesn't ask for a picture or a deck."
+        if (t1 == null) return TieredPlan(route, PlanTier.T0, note = route.reason, refusal = if (route.owners.isEmpty()) {
+            if (route.cues.any { it.op == Op.RENDER }) "A deck needs an amount from your phones' tables: say which one, for example " +
+                "\"pitch deck on net sales FY2024-26\" or \"a deck of units by branch for the last 6 months\"."
+            else "That isn't about the data on your phones, and it doesn't ask for a picture or a deck." }
             else "That is about the data on ${route.owners.size} phone${if (route.owners.size == 1) "" else "s"}, but I can't turn it into steps: " +
                 "ask for a comparison, a ratio, a trend, a ranking, a check against the average or a deck.")
         val pq = t1.getOrElse { e -> return TieredPlan(route, PlanTier.T1, refusal = e.message ?: "this question cannot be planned") }
@@ -137,7 +154,7 @@ class TieredPlannerImpl(
         return TieredPlan(route, PlanTier.T1, pq, compile(pq, catalogs, caps))
     }
 
-    private suspend fun runT2(cloud: T2Planner, question: String, catalogs: List<Catalog>, caps: CapabilitySummary): TieredPlan {
+    private suspend fun runT2(cloud: T2Planner, question: String, catalogs: List<Catalog>, caps: CapabilitySummary, tier: PlanTier = PlanTier.T2): TieredPlan {
         val route = router.route(question, selfId, catalogs)
         val r = try {
             cloud.plan(question, catalogs, caps.capabilities, caps.ops)
@@ -146,9 +163,9 @@ class TieredPlannerImpl(
         } catch (e: Exception) {
             Result.failure(e)
         }
-        val pq = r.getOrElse { e -> return TieredPlan(route, PlanTier.T2, note = e.message ?: "cloud planner failed") }
+        val pq = r.getOrElse { e -> return TieredPlan(route, tier, note = e.message ?: "graph planner failed") }
         val compiled = compile(pq, catalogs, caps)
-        return TieredPlan(route, PlanTier.T2, pq, compiled, note = if (compiled.ok) null else compiled.check.errors.joinToString("; "))
+        return TieredPlan(route, tier, pq, compiled, note = if (compiled.ok) null else compiled.check.errors.joinToString("; "))
     }
 
     private fun compile(pq: PlannedQuestion, catalogs: List<Catalog>, caps: CapabilitySummary): CompiledPlan =

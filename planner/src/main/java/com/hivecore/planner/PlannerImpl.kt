@@ -66,9 +66,12 @@ class PlannerImpl(
         val confidences = ArrayList<Double>()
         var clarification: List<String> = emptyList()
 
-        // 1. pattern
+        // 1. pattern: one candidate whose every required op the question's own cue words supply is taken as read
+        // ("create an image of a penguin": the cue chose it; a model's "none of these" would only refuse the request)
         val options: List<Pattern?> = compatible + listOf(null)
-        val pp = ask("Which plan fits the question \"${question.trim()}\"?", options, { it?.let { p -> "${p.id}: ${p.title}" } ?: "none: none of these fits" })
+        val cueChosen = compatible.singleOrNull()?.takeIf { p -> p.requires.all { it in routeOps } }
+        val pp = if (cueChosen != null) Picked<Pattern?>(cueChosen, 1.0, listOf(cueChosen), true)
+            else ask("Which plan fits the question \"${question.trim()}\"?", options, { it?.let { p -> "${p.id}: ${p.title}" } ?: "none: none of these fits" })
         if (!pp.anyVote) return fail("could not choose a plan for this question (no valid answer from the model)")
         confidences += pp.confidence
         val pattern = (pp.value ?: pp.top.first()) ?: return Result.failure(NoPatternFits(nothingFits()))
@@ -343,7 +346,14 @@ class Candidates(private val q: QText, catalogs: List<Catalog>, routeOwners: Lis
     private fun subject(used: List<IntRange>): List<Candidate> {
         val w = q.words
         var start = 0
-        while (start < w.size && w[start].lowercase() in ASK_LEAD) start++
+        var afterOf = false
+        while (start < w.size && w[start].lowercase() in ASK_LEAD) {
+            val lw = w[start].lowercase()
+            // "an image of a penguin": the article after "of" belongs to the subject
+            if (afterOf && lw in ARTICLES) break
+            afterOf = lw in SUBJECT_LINKS
+            start++
+        }
         var end = w.size
         while (end > start && (w[end - 1].lowercase() in TRAIL || used.any { end - 1 in it })) end--
         if (start >= end) return emptyList()
@@ -458,6 +468,9 @@ class Candidates(private val q: QText, catalogs: List<Catalog>, routeOwners: Lis
             "generate", "draw", "render", "produce", "design", "sketch", "paint", "illustrate", "give", "show", "get", "image", "images",
             "picture", "pictures", "illustration", "illustrations", "drawing", "drawings", "artwork", "visual", "visuals", "graphic",
             "graphics", "pic", "pics", "of", "off", "for", "showing", "depicting", "about", "with", "that", "which", "shows", "represents")
+        val ARTICLES: Set<String> = setOf("a", "an", "the")
+        /** after one of these the subject begins, article and all */
+        val SUBJECT_LINKS: Set<String> = setOf("of", "off", "for", "about", "showing", "depicting", "with")
         /** words dropped from the end of a subject */
         val TRAIL: Set<String> = setOf("please", "pls", "now", "thanks", "thank", "you")
 
