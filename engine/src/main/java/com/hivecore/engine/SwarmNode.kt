@@ -697,6 +697,10 @@ class SwarmNode(
             journalPull: JournalPull? = null,
             ensureAwake: suspend (String) -> Boolean = { true },
             deputy: () -> String? = { null },
+            /** the decision model for the chunking points (docs/plans/decision-chunking.md); null = deterministic cutters only */
+            decisionModel: com.hivecore.core.DecisionModel? = null,
+            /** the per-job budget of decisions (LLM calls, share of the job estimate) */
+            decisionBudget: com.hivecore.engine.decide.DecisionBudget = com.hivecore.engine.decide.DecisionBudget(),
         ): SwarmNode {
             val selfId = router.nodeId
             lateinit var node: SwarmNode
@@ -719,7 +723,8 @@ class SwarmNode(
             node.split = SplitCommander(selfId, comparator, profiles = { beacon.snapshot() }, transmit = { to, t, b -> node.sendTo(to, t, b) },
                 sendBlobs = { to, ids, jobId -> sendBlobsFor(node, to, ids, jobId) }, clock = clock, selector = treeSelector, modelHash = modelHash,
                 journal = journal, memo = memo, escalator = escalator, schema = schemaValidator, readyFor = readyFor, unitMsOf = unitMsOf,
-                allowMobileData = allowMobileData, onCooldown = onCooldown, ensureAwake = ensureAwake, deputy = deputy)
+                allowMobileData = allowMobileData, onCooldown = onCooldown, ensureAwake = ensureAwake, deputy = deputy,
+                decisions = decisionModel?.let { com.hivecore.engine.decide.ChunkDecisions(it, selfId, decisionBudget, clock) })
             node.journal = journal
             node.clock = clock
             if (memo !== ChunkMemo.None) node.reclaim = ReclaimResponder(router, memo)

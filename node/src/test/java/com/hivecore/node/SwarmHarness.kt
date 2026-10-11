@@ -128,6 +128,8 @@ class SwarmHarness(private val testScope: TestScope, private val debugRouters: B
     val bus = FakeBus()
     val nodes = LinkedHashMap<String, Node>()
     private val scopes = ArrayList<CoroutineScope>()
+    /** The decision model a phone commands split jobs with (docs/plans/decision-chunking.md); null = deterministic cutters. Set before [node]. */
+    var decisionModelOf: (String) -> com.hivecore.core.DecisionModel? = { null }
 
     companion object { const val COMMISSION_Q = "average commission by region"; const val GROUP = "g1" }
 
@@ -183,6 +185,8 @@ class SwarmHarness(private val testScope: TestScope, private val debugRouters: B
             modelHash = { "m1" }, clock = now, escalator = escalator,
             journal = if (memoize) journal else JobJournal.None, memo = if (memoize) memo else ChunkMemo.None,
             linkOf = { nid -> if (relay != null) router.linkTo(nid) else null },     // measured links only with the relay rig; the LAN tests set links in profiles
+            decisionModel = decisionModelOf(id),
+            decisionBudget = com.hivecore.engine.decide.DecisionBudget(callMsEstimate = 1.0),   // the fake jobs are milliseconds long; the share rule is tested in the engine
         )
 
         init { scope.launch { router.verified.collect { received += it } } }

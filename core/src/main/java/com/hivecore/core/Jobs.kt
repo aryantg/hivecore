@@ -43,6 +43,8 @@ enum class ChunkState { QUEUED, RUNNING, DONE, DUPLICATED, FAILED }
     val verified: Boolean? = null,
     /** section 15.3: a cloud model answered this chunk (the badge shows the slug) */
     val cloud: String? = null,
+    /** decision model verdict on the accepted output, p(consistent) in [0, 1]; null = not judged */
+    val verdict: Double? = null,
 )
 
 @Serializable data class NodeLoad(

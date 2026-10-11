@@ -26,6 +26,11 @@ data class OpInfo(
     val replicas: Int,
     /** the op that scores this op's output as a local judge (spec section 12.1), if any */
     val judge: Op? = null,
+    /**
+     * The fewest runs a chunk of this op may settle on when the decision model rates it easy (decision point B):
+     * equal to [replicas], so no LLM / VLM op drops to a single run until its row says so.
+     */
+    val minReplicas: Int = replicas,
 ) {
     val axes: Map<String, MergeKind> get() = buildMap {
         shard?.let { put("shard", it) }; chunk?.let { put("chunk", it) }; fanout?.let { put("fanout", it) }

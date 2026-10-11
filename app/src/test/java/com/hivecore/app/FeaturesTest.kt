@@ -23,7 +23,7 @@ class FeaturesTest {
 
     /** Every flag combination: the graph builds, and every screen that combination makes real has a view model behind it. */
     @Test fun graphBuildsTheScreensOfEveryFlagCombination() = runTest {
-        val all = listOf("mesh", "runtime", "split", "graph", "cloud", "remote", "state", "hardening")
+        val all = listOf("mesh", "runtime", "split", "graph", "cloud", "remote", "state", "hardening", "decide")
         for (mask in 0 until (1 shl all.size)) {
             val flags = all.filterIndexed { i, _ -> mask and (1 shl i) != 0 }
             val g = HiveCoreGraph.inMemory(backgroundScope, flags)

@@ -66,8 +66,10 @@ import kotlinx.serialization.json.putJsonArray
  * One chunk of a split job. [params] is overlaid on the job's params; [blobs] are the released items it reads.
  * [ownFrom, ownTo) is the slice of the input this chunk is responsible for in the merge (items, sentences, ms,
  * frames, tiles, rows, seeds); [overlapBefore]/[overlapAfter] the extra context it sees on each side.
- * `chunkId = sha256(op@modelSha256 | params | slice | blobIds)` (section 10.3) makes chunks idempotent across
- * retries, duplicates and jobs. [recutOf] names the parent after an adaptive re-cut (section 14).
+ * `chunkId = sha256(op@modelSha256[|decide:<decider>] | params | slice | blobIds)` (section 10.3) makes chunks
+ * idempotent across retries, duplicates and jobs. [recutOf] names the parent after an adaptive re-cut (section 14).
+ * Decision point B (docs/plans/decision-chunking.md §5) may set [difficulty], [costFactor] (expected ms multiplier),
+ * [replicas] (overrides the plan's) and [build] (the recorded small / large build); re-cut children inherit them.
  */
 @Serializable data class Chunk(
     val index: Int,
@@ -83,6 +85,10 @@ import kotlinx.serialization.json.putJsonArray
     val bytes: Long = 0,
     val private: Boolean = false,
     val recutOf: Int? = null,
+    val difficulty: Double? = null,
+    val costFactor: Double = 1.0,
+    val replicas: Int? = null,
+    val build: String? = null,
 )
 
 /** Deterministic splitters: same input + same chunk size ⇒ same chunks, same ids, on every phone. */
@@ -140,11 +146,15 @@ object Splitters {
 
     /**
      * Sentence chunks: chunk i owns sentences [a, b) and also sees the [overlap] sentences before a (context). STITCH
-     * keeps each sentence's result from the first chunk that saw it, which is the chunk that owns it.
+     * keeps each sentence's result from the first chunk that saw it, which is the chunk that owns it. With
+     * [boundaries] (decided cuts: the `ownTo` of every chunk but the last) the chunks are `[0,b0) [b0,b1) … [bk,n)`;
+     * boundaries outside (0, n) or out of order are ignored.
      */
-    fun text(opKey: String, base: JsonObject, input: SplitInput.Text, per: Int, overlap: Int): List<Chunk> {
+    fun text(opKey: String, base: JsonObject, input: SplitInput.Text, per: Int, overlap: Int, boundaries: List<Int>? = null): List<Chunk> {
         val units = sentenceUnits(input.doc, input.text)
-        return ranges(units.size, per).mapIndexed { i, (a, b) -> textChunk(i, opKey, base, input, units, a, b, overlap) }
+        val n = units.size
+        val rs = boundaries?.let { bs -> val cuts = bs.filter { it in 1 until n }.distinct().sorted(); (listOf(0) + cuts).zip(cuts + n) } ?: ranges(n, per)
+        return rs.mapIndexed { i, (a, b) -> textChunk(i, opKey, base, input, units, a, b, overlap) }
     }
 
     private fun textChunk(i: Int, opKey: String, base: JsonObject, input: SplitInput.Text, units: List<JsonObject>, a: Int, b: Int, overlap: Int, recutOf: Int? = null): Chunk {
@@ -237,7 +247,10 @@ object Splitters {
      * and [firstIndex] + 1, `recutOf = c.index`), cut exactly as a fresh cut of that size would be so their ids match
      * the memo. Null when the chunk is one unit, a VAD segment, a fan-out variant, or an audio window under 2 s.
      */
-    fun recut(opKey: String, base: JsonObject, input: SplitInput, c: Chunk, overlap: Int, firstIndex: Int): List<Chunk>? {
+    fun recut(opKey: String, base: JsonObject, input: SplitInput, c: Chunk, overlap: Int, firstIndex: Int): List<Chunk>? =
+        halve(opKey, base, input, c, overlap, firstIndex)?.map { it.copy(difficulty = c.difficulty, costFactor = c.costFactor, replicas = c.replicas, build = c.build) }
+
+    private fun halve(opKey: String, base: JsonObject, input: SplitInput, c: Chunk, overlap: Int, firstIndex: Int): List<Chunk>? {
         if (c.units < 2 || c.ownTo - c.ownFrom < 2) return null
         val a = c.ownFrom; val b = c.ownTo
         val k = firstIndex; val p = c.index

@@ -27,10 +27,13 @@ object Features {
     val state: Boolean get() = BuildConfig.FEATURE_STATE
     val cloud: Boolean get() = BuildConfig.FEATURE_CLOUD
     val hardening: Boolean get() = BuildConfig.FEATURE_HARDENING
+    /** Decision-driven chunking (docs/plans/decision-chunking.md); needs `runtime` for the model. Default off until its gate passes. */
+    val decide: Boolean get() = BuildConfig.FEATURE_DECIDE
 
     fun enabled(): List<String> = listOfNotNull(
         "mesh".takeIf { meshTrust }, "runtime".takeIf { runtime }, "split".takeIf { split }, "graph".takeIf { graph },
         "remote".takeIf { remote }, "state".takeIf { state }, "cloud".takeIf { cloud }, "hardening".takeIf { hardening },
+        "decide".takeIf { decide },
     )
 
     /**

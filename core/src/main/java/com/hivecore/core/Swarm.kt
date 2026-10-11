@@ -377,4 +377,6 @@ interface ModelPool {
     val big: Boolean,
     val url: String? = null,
     val downloadSha256: String? = null,
+    /** Decision-model calibration for this build (docs/plans/decision-chunking.md §3); absent = identity, version "none". */
+    val calibration: Calibration? = null,
 )

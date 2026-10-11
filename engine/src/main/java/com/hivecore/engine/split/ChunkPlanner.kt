@@ -23,7 +23,9 @@ import kotlinx.serialization.json.JsonPrimitive
  * [unitMs] (expected ms per unit when no benchmark exists). [capability] names the catalog capability (default: the
  * registry's for the op) and [modelSha256] the model build placement resolved (section 10.3: part of every chunk id;
  * [modelId] stands in for it until placement ran). [replicas] pins the replicas per chunk (default: the registry's,
- * 2 for LLM and VLM ops, section 12.1).
+ * 2 for LLM and VLM ops, section 12.1). [decider] names the decision model build that cut the job
+ * (`<sha256>:<calibration>+t<templates>`, docs/plans/decision-chunking.md §6) and [cuts] its decided text boundaries
+ * (the `ownTo` of every chunk but the last): a journaled decided job re-plans identically without the model.
  */
 @Serializable data class SplitJob(
     val jobId: String,
@@ -39,9 +41,14 @@ import kotlinx.serialization.json.JsonPrimitive
     val capability: String? = null,
     val modelSha256: String? = null,
     val replicas: Int? = null,
+    val decider: String? = null,
+    val cuts: List<Int>? = null,
 ) {
-    /** `op@modelSha256` (section 10.3); the model id stands in until placement resolved the build. */
-    val opKey: String get() = op.name + "@" + (modelSha256 ?: modelId ?: "")
+    /**
+     * `op@modelSha256` (section 10.3), plus `|decide:<decider>` when a decision model cut the job, so a different
+     * decision build or calibration yields different chunk ids and the memo never serves its cuts.
+     */
+    val opKey: String get() = op.name + "@" + (modelSha256 ?: modelId ?: "") + (decider?.let { "|decide:$it" } ?: "")
     /** The capability the op needs (section 4.3), from the job or the op registry. */
     val cap: String? get() = capability ?: OpRegistry[op].capability
 
@@ -77,7 +84,8 @@ data class SplitPlan(
     /** the sentence overlap the text splitter used (a re-cut text chunk is cut the same way) */
     val overlap: Int = 0,
 ) {
-    fun expectedMs(c: Chunk, node: String): Double = c.units * (unitMs[node] ?: defaultUnitMs)
+    /** Expected ms of [c] on [node]: units × the phone's ms per unit × the chunk's decided cost factor (1.0 unless decided). */
+    fun expectedMs(c: Chunk, node: String): Double = c.units * c.costFactor * (unitMs[node] ?: defaultUnitMs)
 
     /** The map task of [c] (params = job params overlaid with the chunk's slice). */
     fun task(c: Chunk, id: String = "c${c.index}"): TaskSpec = TaskSpec(id, job.op, JsonObject(job.params + c.params + (ChunkPlanner.CHUNK_ID_PARAM to JsonPrimitive(c.chunkId))),
@@ -160,7 +168,7 @@ class ChunkPlanner(private val targetMs: Double = SplitConstants.TARGET_CHUNK_MS
         val chunks = when (val inp = job.input) {
             is SplitInput.Items -> Splitters.items(job.opKey, base, inp, per)
             is SplitInput.Blobs -> Splitters.blobs(job.opKey, base, inp, per)
-            is SplitInput.Text -> Splitters.text(job.opKey, base, inp, per, overlap)
+            is SplitInput.Text -> Splitters.text(job.opKey, base, inp, per, overlap, job.cuts?.takeIf { job.unitsPerChunk == null && job.chunks == null })
             is SplitInput.Audio -> Splitters.audio(job.opKey, base, inp, minOf(per, MAX_AUDIO_S) * 1000L)
             is SplitInput.Video -> Splitters.video(job.opKey, base, inp, per)
             is SplitInput.Image -> Splitters.image(job.opKey, base, inp, per)

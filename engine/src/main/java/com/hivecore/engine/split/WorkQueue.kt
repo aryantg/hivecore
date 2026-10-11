@@ -36,6 +36,8 @@ enum class ChunkStatus { QUEUED, RUNNING, DUPLICATED, DONE, FAILED }
     val recutOf: Int? = null,
     /** section 15.3: the cloud slug that answered this chunk after a verification failure */
     val cloud: String? = null,
+    /** decision point E: the model's p(consistent) for the accepted output; null = not judged */
+    val verdict: Double? = null,
 )
 
 /** Per-phone throughput and utilisation. [link] = how the phone is reached (section 5.6), null for this phone. */
@@ -120,6 +122,11 @@ class WorkQueue(
     val replicas: Int = plan.replicas,
     /** section 14 adaptive re-cut on (exact merge kinds only) */
     private val recutEnabled: Boolean = true,
+    /**
+     * Decision point E: when replicas disagree and no further phone can run the chunk, hand the held outputs out as a
+     * [VerdictRequest] (the commander asks the decision model and answers with [verdict]) instead of failing at once.
+     */
+    private val verdictEnabled: Boolean = false,
 ) {
     class Attempt(val chunk: Int, val node: String, val no: Int, val duplicate: Boolean, val dispatchedAt: Long, val expectedDoneAt: Long, val deadlineAt: Long)
 
@@ -140,6 +147,9 @@ class WorkQueue(
 
     /** A chunk whose replicas (or schema checks) failed verification; the commander escalates or fails it (section 12.1). */
     data class VerificationFailure(val index: Int, val reason: String, val attempts: Int, val outputs: List<JsonElement>)
+
+    /** Held, hash-checked outputs of one chunk that disagree with no phone left to decide: the decision model may pick one. */
+    data class VerdictRequest(val index: Int, val candidates: List<Pair<String, JsonElement>>)
 
     private class Held(val node: String, val output: JsonElement, val ms: Long)
 
@@ -166,6 +176,9 @@ class WorkQueue(
     private val children = HashMap<Int, List<Int>>()
     private val verifyFailed = LinkedHashMap<Int, VerificationFailure>()
     private val reportedFailures = HashSet<Int>()
+    private val verdictWanted = LinkedHashMap<Int, VerdictRequest>()
+    private val reportedVerdicts = HashSet<Int>()
+    private val verdicts = HashMap<Int, Double>()
     private val assembledNew = ArrayList<Int>()
     private val busy = HashMap<String, Long>()
     private val doneChunks = HashMap<String, Int>()
@@ -349,7 +362,8 @@ class WorkQueue(
 
     private fun terminal(i: Int): Boolean = i in outputs || i in failed || i in children
     private fun liveCount(i: Int): Int = live.values.sumOf { l -> l.count { it.chunk == i } }
-    private fun wanted(i: Int): Int = runsWanted[i] ?: replicas
+    /** Runs a chunk needs: a disagreement's third phone, else the chunk's decided replicas (point B), else the plan's. */
+    private fun wanted(i: Int): Int = runsWanted[i] ?: chunks[i].replicas?.coerceIn(1, SplitConstants.MAX_REPLICAS) ?: replicas
     /** The chunk still needs a run started (and so sits in the queue). */
     private fun pending(i: Int): Boolean = !terminal(i) && i !in verifyFailed && held[i].orEmpty().size + liveCount(i) < wanted(i)
     private fun anotherPhoneCould(i: Int): Boolean = active.any { canTake(i, it) }
@@ -383,6 +397,7 @@ class WorkQueue(
     /** Decides a chunk from its held replica outputs (section 12.1); [force] = no further phone will come. */
     private fun settle(index: Int, force: Boolean = false): Outcome {
         val h = held[index] ?: return Outcome.AwaitingReplica
+        if (index in verdictWanted) return Outcome.AwaitingReplica
         val canWait = !force && (liveCount(index) > 0 || anotherPhoneCould(index))
         if (h.size >= 2) {
             for (x in h.indices) for (y in x + 1 until h.size) if (agree(h[x].output, h[y].output)) return accept(index, h[x], verified = true)
@@ -395,18 +410,58 @@ class WorkQueue(
                 if (pending(index)) enqueueFront(index)
                 return Outcome.AwaitingReplica
             }
-            verifyFailed[index] = VerificationFailure(index, "${h.size} phones disagreed on ${Splitters.label(plan.job.input, chunks[index])}", attempts[index] ?: 0, h.map { it.output })
-            held.remove(index); queue.remove(index)
-            notes += "chunk $index: no agreeing pair among ${h.size} replicas"
-            return Outcome.AwaitingReplica
+            if (verdictEnabled) {
+                verdictWanted[index] = VerdictRequest(index, h.map { it.node to it.output })
+                queue.remove(index)
+                notes += "chunk $index: no agreeing pair among ${h.size} replicas; asking the decision model"
+                return Outcome.AwaitingReplica
+            }
+            return failVerdict(index)
         }
-        if (wanted(index) <= 1) return accept(index, h[0], verified = null)
+        // A chunk decided to run once on an op the registry replicates (point B) is accepted but never "verified",
+        // so it is not memoized (section 12.1: single-phone LLM answers are never memoized).
+        if (wanted(index) <= 1) return accept(index, h[0], verified = if (replicas > 1) false else null)
         if (canWait) {
             if (pending(index)) enqueueFront(index)
             return Outcome.AwaitingReplica
         }
         notes += "chunk $index: only one phone could run it; not verified"
         return accept(index, h[0], verified = false)
+    }
+
+    /** The disagreement is a verification failure (section 12.1): the commander escalates or fails the chunk. */
+    private fun failVerdict(index: Int): Outcome {
+        val h = held[index] ?: return Outcome.AwaitingReplica
+        verifyFailed[index] = VerificationFailure(index, "${h.size} phones disagreed on ${Splitters.label(plan.job.input, chunks[index])}", attempts[index] ?: 0, h.map { it.output })
+        held.remove(index); queue.remove(index)
+        notes += "chunk $index: no agreeing pair among ${h.size} replicas"
+        return Outcome.AwaitingReplica
+    }
+
+    /** Verdict requests the commander has not seen yet (each handed out once; the chunk waits for [verdict]). */
+    fun takeVerdictRequests(): List<VerdictRequest> =
+        verdictWanted.values.filter { it.index !in reportedVerdicts }.onEach { reportedVerdicts += it.index }
+
+    /**
+     * Decision point E, the tie-break: [winner] (one of the request's nodes) is accepted "not verified" and never
+     * memoized; null keeps the verification-failure path exactly as without a decision model.
+     */
+    fun verdict(index: Int, winner: String?) {
+        val req = verdictWanted.remove(index) ?: return
+        reportedVerdicts -= index
+        val pick = winner?.let { w -> held[index]?.firstOrNull { it.node == w } }
+        if (pick != null) {
+            notes += "chunk $index: the decision model picked ${pick.node.take(8)} among ${req.candidates.size} disagreeing replicas (not verified)"
+            accept(index, pick, verified = false)
+        } else failVerdict(index)
+        publish()
+    }
+
+    /** Decision point E, the annotation: p(consistent) of the accepted output; under 0.5 is noted as low confidence. */
+    fun annotateVerdict(index: Int, p: Double) {
+        verdicts[index] = p
+        if (p < LOW_CONFIDENCE) notes += "chunk $index: low-confidence output (p=$p)"
+        publish()
     }
 
     private fun accept(i: Int, h: Held, verified: Boolean?): Outcome.Accepted {
@@ -604,7 +659,7 @@ class WorkQueue(
             }
             ChunkCell(i, chunks[i].chunkId, chunks[i].units, status, if (i in outputs) listOfNotNull(doneBy[i]) else running,
                 doneBy[i], attempts[i] ?: 0, i in duplicated, doneMs[i] ?: 0L, i in memo, Splitters.label(plan.job.input, chunks[i]),
-                verified = verified[i], recut = kids != null, recutOf = chunks[i].recutOf, cloud = cloudBy[i])
+                verified = verified[i], recut = kids != null, recutOf = chunks[i].recutOf, cloud = cloudBy[i], verdict = verdicts[i])
         }
         val ns = (active + busy.keys).sorted().map { n ->
             val b = busy[n] ?: 0L
@@ -627,6 +682,8 @@ class WorkQueue(
         /** Fault classes of the queue's own checks (beside the section 14 result classes). */
         const val TIMEOUT = "timeout"
         const val MISMATCH = "mismatch"
+        /** Decision point E: a verdict under this is noted as a low-confidence output. */
+        const val LOW_CONFIDENCE = 0.5
 
         fun taskId(index: Int, attempt: Int): String = "c$index.a$attempt"
 

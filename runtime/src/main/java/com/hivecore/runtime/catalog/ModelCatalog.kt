@@ -137,6 +137,7 @@ class ModelCatalog(entries: List<ModelEntry>, val version: String = "") {
                 if (e.big && BigKind.of(e.capability) == BigKind.NONE) problems += "$at: big build for a capability with no big-slot kind"
                 e.url?.let { if (!isHttpUrl(it)) problems += "$at: url must be http(s)" }
                 e.downloadSha256?.let { if (!isHex64(it)) problems += "$at: downloadSha256 must be 64 hex digits" }
+                e.calibration?.problems()?.forEach { problems += "$at: $it" }
                 if (!seen.add(e.modelId to e.capability)) problems += "$at: duplicate (modelId, capability)"
                 val prev = runtimeOf.put(e.modelId, e.runtime)
                 if (prev != null && prev != e.runtime) problems += "$at: model listed under runtimes '$prev' and '${e.runtime}'"
