@@ -112,3 +112,32 @@ What this run taught (each fixed in the code):
   while it advertises eligible.
 - **No reason on the tile.** The Jobs grid shows "failed on ?" without the cause, and the worker's task path logged
   nothing; the worker now logs each task's start, end and outcome.
+
+## Demo runbook
+
+Build: `tools/gradle.sh :app:assembleDebug -PhiveFeatures=all -PhiveDemoThermal`, then `adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk`.
+
+**Before the audience arrives (each phone)**
+1. Settings > Demo > Permissions: grant everything listed (the card turns green). All files access is only needed
+   for the model bundles in `Download/HiveCoreModels`.
+2. Settings > Demo > This phone is: pick its role (phone A Sales, B HR, C Accounts); the result line confirms the seed.
+3. Turn on Keep the screen on (and Large text for a projector). Hide hashes if nobody will ask about them.
+4. Phone A: Swarm > Pair a phone; phone B: Scan QR; both show the same six digits; They match on both. Phone C joins
+   from a shared invite link (Share on phone A, open the link on C).
+5. On B and C, turn on Share this phone when idle, then lock them (workers take chunks only with the screen off for
+   60 s or on the charger in the background).
+6. Settings > Demo > Reset and restart on A clears earlier runs (pairing is kept unless ticked).
+
+**On stage (phone A)**
+1. Home: tap "Revenue per rep by region" → the plan card shows LOCAL and CLOUD side by side → LOCAL → the answer with
+   provenance from Sales and HR. The activity icon tells the story step by step.
+2. Tap "Top region, with HR's approval" → phone B shows the approval screen → one fingerprint → the answer on A.
+   (Auto-approve in Settings > Demo covers a phone without an enrolled fingerprint.)
+3. Tap "Read 120 invoice photos" → Jobs opens on Photo text → "120 samples" → Run → the grid fills across three
+   phones → the result shows the speed-up → Open result shows every photo's text. Run once with Private on first to
+   earn the "identical to one phone" badge.
+4. Settings > Demo > Consent sheet shows the cloud consent moment without a key or a disagreement.
+
+**If the Wi-Fi fails**: Settings > Demo > Demo mode on phone A. The app restarts over three scripted phones and every
+moment above works on that one phone; 3× faster is there for rehearsals. Turn it off to return to the real swarm.
+

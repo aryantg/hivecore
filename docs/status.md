@@ -6,7 +6,7 @@ Updated 2026-10-10 (phases 1-8 merged and wired behind their flags; the integrat
 
 - Multi-module Android project (AGP 8.13.2, Kotlin 2.4.20, Compose BOM 2026.06.01, compileSdk 36, minSdk 31, JDK 17) plus `relayd/` (Go).
 - `tools/gradle.sh <args>` is the only way to run Gradle on this machine (one build at a time across every checkout).
-- JVM unit tests: `tools/gradle.sh testDebugUnitTest` runs 982 tests, all green, in about two minutes warm (the four-seed soak harness `SoakTest` is among them); `relayd` has 18 Go tests.
+- JVM unit tests: `tools/gradle.sh testDebugUnitTest` runs 1,024 tests, all green, in about two minutes warm (the four-seed soak harness `SoakTest` is among them); `relayd` has 18 Go tests.
 - Debug APK: `tools/gradle.sh :app:assembleDebug` (every flag off) and `tools/gradle.sh :app:assembleDebug -PhiveFeatures=all` both build. `-PhiveDemoThermal` relaxes the thermal limits for demos (not for gate runs). Flags: `mesh,runtime,split,graph,remote,state,cloud,hardening`.
 
 ## Module table
@@ -22,8 +22,8 @@ Updated 2026-10-10 (phases 1-8 merged and wired behind their flags; the integrat
 | `:node` | executors incl. `LLM_MAP`, data and document stores; the document executors (`docai`: OCR, LAYOUT, DOC_CLASSIFY, METADATA, REDACT, FIELDS over ML Kit); the 3-phone fake swarm (`SwarmHarness` with memoize and relay rigs) and its scenarios: split, merge properties, commander, escalation incl. the CLOUD option, resume, authorisation, relay, the chaos soak | 354 |
 | `:cloud` | OpenRouter client (internal), `EscalationGate`, `CloudPlannerImpl`, `ModelsConfig`, caps, key store, consent seam, `CloudFactory` (the only way out) | 36 |
 | `:ledger` | hash chain, receipt exchange, split ledger entries and replay | 16 |
-| `:ui` | the six screens and their view models over the five ports; `SwarmPort.warnings` for mesh warnings | 41 |
-| `:app` | `AppWiring` (per-flag graph), `AppPorts` (the real ports), `HiveCoreGraph`, consent sheet, the plan approval screen and notifier, FCM wake; boundary, flag-combination and approval tests | 7 |
+| `:ui` | the design system and kit (`ui/design`), the shell (`ui/shell`), the chat Home and the five capability pages with their view models over the ports, the result and activity sheets, `DemoPort`, the scripted demo (`ui/demo`); `DesignGuardTest` enforces `docs/ui-template.md` | 72 |
+| `:app` | `AppWiring` (per-flag graph), `AppPorts` (the real ports), `HiveCoreGraph`, consent sheet, the plan approval screen and notifier, FCM wake, the demo tools (`app/demo`: `DemoPortImpl`, `DemoWiring`, sample invoices, QR scanner, reset, permission checklist, feed bridges); boundary, flag-combination, approval, feed and demo-tool tests | 13 |
 
 ## What runs on a phone, per flag
 
@@ -38,6 +38,26 @@ Updated 2026-10-10 (phases 1-8 merged and wired behind their flags; the integrat
 - **hardening**: no wiring of its own; the phase-9 pieces that exist (adaptive re-cut, cooldowns, deputy, relay hold, relay clock) ride on the other flags, and the soak harness is a JVM test (`SoakTest`).
 
 Without `mesh`, the node runs over an in-process loopback transport, so split jobs and plans still run on one phone.
+
+## The UI and the demo
+
+- **Look and template.** Honey amber on slate, light and dark, an adaptive hexagon icon and the platform splash. Every
+  screen uses `HiveScreen` and the kit in `com.hivecore.ui.design`; `docs/ui-template.md` is the contract for new
+  features and `DesignGuardTest` fails the build on raw colours, sizes, shapes, library icons or missing previews.
+- **Home is a chat** (Ask): greeting and four suggestion cards, bubbles, the plan card with LOCAL and CLOUD side by
+  side, live status, answers with provenance, a pill composer with the cloud policy pill. The other pages open with a
+  capability header and a "Try it in chat" prompt.
+- **Top bar**: phones chip (taps to Swarm), activity feed with an unread badge, a DEMO pill in demo mode; while a job
+  runs, the newest activity line shows under it.
+- **Results**: "Open result" shows the merged output (the OCR text of every photo, or a table) with Copy as CSV. The
+  "identical to one phone" badge appears only after a one-phone run and a swarm run of the same request.
+- **Swarm**: Scan QR uses the camera (CameraX + ML Kit's bundled barcode model); Copy, Share and the battery exemption
+  are wired.
+- **Settings > Demo**: demo mode, the phone's role (seeds its tables and documents), seed every role, 24 or 120 sample
+  invoice photos drawn on the device, approval screen and consent sheet previews, debug auto-approve, keep screen on,
+  large text, hide hashes, the permission checklist and reset-and-restart. `docs/gates.md` has the demo runbook.
+- **Demo mode** runs the app over three scripted phones on one device (no mesh): the job splits with a straggler and
+  lands at about 2.6×, the suggestion prompts plan and answer, the commission question uses the real approval screen.
 
 ## Still fake or not wired
 

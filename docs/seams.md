@@ -41,3 +41,4 @@ Shared files no track edits: `core/**` (except `JsonSchema.kt`), `engine/SwarmNo
 - No attribution strings and no legacy product or vendor names appear in code, docs or commits; commit messages read as the author's own.
 - No dependency from any module below `:app` on `:cloud` (the build enforces it).
 - Commit on the track branch; never touch `main`.
+- Screens and UI features follow `docs/ui-template.md`; `DesignGuardTest` enforces it.
