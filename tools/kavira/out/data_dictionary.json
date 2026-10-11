@@ -1,0 +1,30 @@
+{
+  "fiscal_year": "Indian fiscal year; FY2024 = Apr 2023 to Mar 2024. FY2023 is a baseline only.",
+  "sales_money": "INR lakh (100 lakh = 1 crore)",
+  "net_sales_inr_lakh": "Revenue after discounts. Use this for 'sales' or 'revenue'.",
+  "units": "Packs sold; for Contract Manufacturing, thousands of tablets",
+  "segments": [
+    "Branded Formulations",
+    "Institutional",
+    "Contract Manufacturing"
+  ],
+  "branches": [
+    "BLR",
+    "CHN",
+    "KOC"
+  ],
+  "contract_manufacturing_branch": "billed from BLR (plant)",
+  "salaries": "INR per year, snapshot 31 Mar 2026. Restricted: see access_policy.json",
+  "hr_files": {
+    "employees.csv": "directory, no pay",
+    "compensation.csv": "restricted",
+    "salary_history.csv": "restricted",
+    "hr_shards/": "one restricted file per branch phone"
+  },
+  "medical_rep_designations": [
+    "Medical Representative",
+    "Senior Medical Representative",
+    "Principal Medical Representative"
+  ],
+  "not_in_data": "No data after Mar 2026, no Hyderabad branch yet, no competitor data, no former employees"
+}

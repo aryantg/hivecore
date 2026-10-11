@@ -1,0 +1,38 @@
+{
+  "name": "Kavira Pharmaceuticals Pvt Ltd",
+  "fictional": true,
+  "msme_category": "Small enterprise",
+  "hq": "Bengaluru",
+  "founded": 2006,
+  "employees": 280,
+  "plant": "Unit-1, Bengaluru (tablets, capsules, creams, syrups)",
+  "branches": {
+    "BLR": "Bengaluru - Karnataka",
+    "CHN": "Chennai - Tamil Nadu",
+    "KOC": "Kochi - Kerala (opened Jul 2023)"
+  },
+  "segments": [
+    "Branded Formulations",
+    "Institutional",
+    "Contract Manufacturing"
+  ],
+  "it_team": 2,
+  "available_devices": {
+    "type": "company-issued Android phones (phone-first; no laptops assumed)",
+    "total": 204,
+    "by_tier": {
+      "upper": 43,
+      "flagship": 10,
+      "entry": 58,
+      "mid": 93
+    },
+    "where_they_gather": {
+      "HQ office, daily": 25,
+      "Plant shift": 36,
+      "Bengaluru Monday sales review": 60,
+      "Chennai Monday sales review": 51,
+      "Kochi Monday sales review": 32
+    }
+  },
+  "fiscal_year_note": "Indian fiscal year; FY2024 = Apr 2023 to Mar 2024"
+}

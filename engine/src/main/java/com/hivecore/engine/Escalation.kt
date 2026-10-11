@@ -121,6 +121,23 @@ interface Escalator {
 fun interface SchemaValidator {
     fun validate(output: JsonElement, schema: JsonObject): String?
 
+    /**
+     * The step's `schema` against an [op]'s result. `LLM_MAP` answers `{"items":[{item, output}]}` where the schema
+     * describes each `output` (spec 7.5), so every item is checked; any other op's result is checked whole. Shared by
+     * the plan commander and the split commander (phone finding: the split path checked the envelope, so every
+     * table-recipe chunk failed "schema validation failed").
+     */
+    fun check(op: com.hivecore.core.Op, output: JsonElement, schema: JsonObject): String? {
+        if (op != com.hivecore.core.Op.LLM_MAP) return validate(output, schema)
+        val items = (output as? JsonObject)?.get("items") as? kotlinx.serialization.json.JsonArray ?: return "no items"
+        if (items.isEmpty()) return "no items"
+        items.forEachIndexed { i, it ->
+            val value = (it as? JsonObject)?.get("output") ?: return "item $i has no output"
+            validate(value, schema)?.let { why -> return "item $i: $why" }
+        }
+        return null
+    }
+
     companion object {
         /** Accepts everything (pre-v2 behaviour). */
         val NONE = SchemaValidator { _, _ -> null }

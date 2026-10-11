@@ -1,0 +1,20 @@
+product_id,brand,molecule,therapy_area,segment,pack,launch,trade_price,also_on_govt_tender
+S01,Paracare 650,Paracetamol 650 mg,Analgesic / Fever,Branded Formulations,strip of 15,before FY2023,31.8,yes
+S02,Pantowin 40,Pantoprazole 40 mg,Gastroenterology,Branded Formulations,strip of 15,before FY2023,79.8,no
+S03,Azikind 500,Azithromycin 500 mg,Anti-infectives,Branded Formulations,strip of 3,before FY2023,74.2,yes
+S04,Cefikind 200,Cefixime 200 mg,Anti-infectives,Branded Formulations,strip of 10,before FY2023,111.3,yes
+S05,Telmira 40,Telmisartan 40 mg,Cardiology,Branded Formulations,strip of 15,before FY2023,123.2,no
+S06,Telmira-AM,Telmisartan 40 mg + Amlodipine 5 mg,Cardiology,Branded Formulations,strip of 15,before FY2023,151.2,no
+S07,Metfora SR 500,Metformin SR 500 mg,Diabetology,Branded Formulations,strip of 15,before FY2023,49.05,yes
+S08,Glimora M2,Glimepiride 2 mg + Metformin 500 mg,Diabetology,Branded Formulations,strip of 15,before FY2023,92.65,no
+S09,Vildora M,Vildagliptin 50 mg + Metformin 500 mg,Diabetology,Branded Formulations,strip of 15,2024-08,234.6,no
+S10,Rosukind 10,Rosuvastatin 10 mg,Cardiology,Branded Formulations,strip of 15,before FY2023,156.8,no
+S11,Calvira D3,Calcium 500 mg + Vitamin D3,Nutrition,Branded Formulations,strip of 15,before FY2023,134.4,no
+S12,Lulifine Cream,Luliconazole 1%,Dermatology,Branded Formulations,tube 30 g,before FY2023,207.1,no
+S13,Acneclear Gel,Adapalene 0.1% + Clindamycin 1%,Dermatology,Branded Formulations,tube 15 g,2025-06,165,no
+S14,Coldeze Syrup,Cold & cough relief syrup,Respiratory,Branded Formulations,bottle 100 ml,before FY2023,101.65,no
+S15,Montikind-LC,Montelukast 10 mg + Levocetirizine 5 mg,Respiratory,Branded Formulations,strip of 10,before FY2023,159.0,no
+S16,Pregakind M,Pregabalin 75 mg + Methylcobalamin,Neurology / Pain,Branded Formulations,strip of 10,before FY2023,201.6,no
+C01,Contract mfg - Client A,Tablets (various),Contract manufacturing,Contract Manufacturing,"per 1,000 tablets (conversion charge)",before FY2023,340,no
+C02,Contract mfg - Client B,Tablets & capsules,Contract manufacturing,Contract Manufacturing,"per 1,000 tablets (conversion charge)",before FY2023,360,no
+C03,Contract mfg - Client C,Tablets,Contract manufacturing,Contract Manufacturing,"per 1,000 tablets (conversion charge)",2025-07,350,no

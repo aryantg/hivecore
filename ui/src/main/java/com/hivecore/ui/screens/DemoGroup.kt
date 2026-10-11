@@ -65,7 +65,8 @@ fun DemoGroup(d: SettingsViewModel.DemoState, a: DemoActions) {
 
         Text("This phone is", style = MaterialTheme.typography.bodyLarge)
         SegmentedChoice(NodeRole.entries, d.role, label = { it.label() }, onSelect = a.setRole, enabled = !busy)
-        Text("Picking a role loads its sample tables and documents (HR: employees; Sales: sales; Accounts: invoices).",
+        Text("Picking a role loads that phone's share of Kavira Pharmaceuticals' data (Sales: monthly sales, products, branches, sales force, events, stockists; " +
+            "HR: staff, compensation, salary history, phones; Accounts: financials, receivables, budget vs actual).",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         HiveButton(HiveAction("Seed all three roles here", HiveIcons.data, enabled = !busy, onClick = a.seedAll), ButtonKind.Text)
         PreferenceDivider()

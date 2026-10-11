@@ -142,6 +142,12 @@ class SwarmNode(
     var evalCases: () -> List<JsonElement> = { emptyList() }
     /** The installed model ids as items for a recipe over `model` items (BENCH); phone gate finding: `bench_all` had no item source. */
     var modelItems: () -> List<JsonElement> = { emptyList() }
+    /**
+     * Items for recipes whose input is "table" (Kavira data amendment): the rows of this phone's table grouped as the
+     * recipe's [com.hivecore.engine.workload.RecipeSource] says, each `{"item": key, "text": lines}`. Throws with the
+     * sentence the Jobs screen shows when the table is not on this phone or a column is confidential.
+     */
+    var tableItems: (com.hivecore.engine.workload.RecipeSource) -> List<JsonElement> = { throw IllegalStateException("this phone has no data store for table recipes") }
     /** Private mode (§7): tables and documents (ids and names) the owner marked private; their chunks never leave this phone. */
     var privateTables: () -> Set<String> = { emptySet() }
     var privateDocs: () -> Set<String> = { emptySet() }
@@ -244,6 +250,12 @@ class SwarmNode(
                             val cases = if ("model" in r.itemKinds) modelItems() else evalCases()
                             if (cases.isEmpty()) throw IllegalArgumentException("recipe ${r.id}: no items on this phone")
                             runStages(jobId, RecipeJobs.itemJobs(jobId, r, cases, selfId, request.private))
+                        }
+                        def?.input == "table" -> {
+                            val src = def.source ?: throw IllegalArgumentException("recipe ${r.id} names no source table")
+                            val items = tableItems(src)
+                            if (items.isEmpty()) throw IllegalArgumentException("recipe ${r.id}: ${src.table} has no rows for it on this phone")
+                            runStages(jobId, RecipeJobs.itemJobs(jobId, r, items, selfId, request.private, key = "texts"))
                         }
                         else -> throw IllegalArgumentException("recipe ${r.id} needs input files")
                     }
@@ -480,7 +492,9 @@ class SwarmNode(
             return
         }
         synchronized(lock) {
-            if (handledTasks.put(key, true) != null) { SLog.d(TAG, "TASK $key again; ignored"); return }
+            // the same TASK delivered twice is ignored; a fresh attempt of the same task id (a schema retry on this
+            // phone, a new nonce) runs again
+            if (handledTasks.put("$key|${body.nonce}", true) != null) { SLog.d(TAG, "TASK $key again; ignored"); return }
             while (handledTasks.size > 1000) handledTasks.remove(handledTasks.keys.first())
         }
         if (OpClasses.of(body.task.op) == OpClass.OWNER) {
@@ -546,6 +560,12 @@ class SwarmNode(
         var body = MeshJson.encode(res)
         val store = blobs
         val output = res.output
+        // Files an executor produced (a generated picture) travel with the result when this phone holds them as blobs:
+        // the output names each by its sha256, the orchestrator's deck step reads them from its own store.
+        if (output != null && to != selfId && store != null) for (id in attachments(output)) {
+            if (!store.has(id)) continue
+            sendBlob(to, id, res.planId).onFailure { SLog.w(TAG, "TASK_RESULT ${res.taskId}: attachment ${id.take(8)} not sent: ${it.message}") }
+        }
         if (body.length > MAX_INLINE_RESULT && output != null && to != selfId && store != null) {
             // Phone gate finding: a 30-photo OCR chunk is ~74 KB of JSON, over the 64 KB envelope; send it as a blob.
             val id = store.put(Canon.canonical(output).toByteArray(Charsets.UTF_8))
@@ -613,6 +633,12 @@ class SwarmNode(
     companion object {
         private const val TAG = "SwarmNode"
 
+        /** The sha256 of every `items[].sha256` in an executor output: files that may travel with the result. */
+        fun attachments(output: JsonElement): List<String> {
+            val items = (output as? JsonObject)?.get("items") as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+            return items.mapNotNull { ((it as? JsonObject)?.get("sha256") as? kotlinx.serialization.json.JsonPrimitive)?.content?.takeIf { s -> s.length == 64 } }.distinct()
+        }
+
         private suspend fun sendBlobsFor(node: SwarmNode, to: String, ids: List<String>, jobId: String): Result<Long> {
             var bytes = 0L
             for (id in ids) {
@@ -676,6 +702,8 @@ class SwarmNode(
             docIndex: DocIndex? = null,
             docAnswerer: DocAnswerer? = null,
             blobDir: File? = null,
+            /** where a deck plan's .pptx lands on the orchestrator (null = decks are built as structure only) */
+            deckDir: File? = null,
             runner: TaskRunner = TaskRunnerImpl(router.nodeId),
             extraExecutors: List<OpExecutor> = emptyList(),
             nameOf: (String) -> String = { it.take(8) },
@@ -718,7 +746,7 @@ class SwarmNode(
             node.commander = Commander(selfId, selfName, planner, planCompiler, scheduler, reducer, comparator,
                 profiles = { beacon.snapshot() }, transmit = { to, t, b -> node.sendTo(to, t, b) }, ledger = ledger,
                 nameOf = { id -> if (id == selfId) selfName else nameOf(id) }, modelHash = modelHash, dataVersionOf = dataVersionOf, clock = clock,
-                escalator = escalator, schemaValidator = schemaValidator)
+                escalator = escalator, schemaValidator = schemaValidator, deckDir = deckDir, blobFile = { sha -> node.blobs?.file(sha) })
             node.nameOf = { id -> if (id == selfId) selfName else nameOf(id) }
             node.split = SplitCommander(selfId, comparator, profiles = { beacon.snapshot() }, transmit = { to, t, b -> node.sendTo(to, t, b) },
                 sendBlobs = { to, ids, jobId -> sendBlobsFor(node, to, ids, jobId) }, clock = clock, selector = treeSelector, modelHash = modelHash,

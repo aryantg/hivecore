@@ -1,0 +1,16 @@
+{
+  "negative": "text, letters, numbers, watermark, logo, blurry, distorted hands, deformed faces",
+  "cover": "small modern pharmaceutical plant in South India, white building with green trees, morning light",
+  "manufacturing": "tablet compression machine in a clean pharmaceutical cleanroom, stainless steel, bright light",
+  "quality_lab": "quality control laboratory with glassware and instruments, analyst seen from behind, soft light",
+  "field_force": "medical representative on a scooter outside a small clinic in a South Indian town, warm light, face not visible",
+  "pharmacy": "neighbourhood pharmacy counter in a South Indian town, shelves of medicine boxes, no readable text",
+  "bengaluru": "tree-lined Bengaluru street with modern buildings at dusk",
+  "chennai": "Chennai coastline at sunrise, wide angle",
+  "kochi": "Kochi waterfront with traditional fishing nets at sunset",
+  "diabetes_care": "glucometer beside a healthy breakfast on a table, soft light",
+  "dermatology": "skincare tube on a clean bathroom shelf, minimal",
+  "tender_supply": "organised warehouse with stacked medicine cartons and a delivery truck",
+  "growth": "abstract rising teal light trails on navy background, minimal",
+  "outlook": "sunrise over a South Indian city skyline, hopeful, wide angle"
+}

@@ -60,6 +60,8 @@ class DataStore(
     var docSeeder: (NodeRole, List<String>) -> Unit = { _, _ -> }
     /** Set by the docs package: the documents for the schema. */
     var docLister: () -> List<DocDef> = { emptyList() }
+    /** Set by the docs package: the documents that came from the seed (only these are pruned when a phone's share changes). */
+    var seedDocLister: () -> List<DocDef> = { emptyList() }
     /** Set by the docs package: delete every non-seed document (demo reset). */
     var docResetter: () -> Unit = { }
 
@@ -196,16 +198,22 @@ class DataStore(
 
     override suspend fun seed(role: NodeRole) = seedNow(role)
 
-    /** Applies `seed/seed_manifest.json` for the role: imports its tables (idempotent) and sets flags/aliases. */
-    fun seedNow(role: NodeRole) {
+    /**
+     * Applies `seed/seed_manifest.json` for the role: imports its tables (idempotent) and sets flags/aliases.
+     * [exclusive] (picking "this phone is …"): first removes the seed tables and seed documents that are not this
+     * role's, so each phone holds only its share of the data; otherwise (seeding every role on one phone) only the
+     * seed data no role lists any more (an older manifest's) is removed. Data the owner imported is never touched.
+     */
+    fun seedNow(role: NodeRole, exclusive: Boolean = true) {
         val manifest = assets.open("seed/seed_manifest.json").use { it.readBytes().toString(Charsets.UTF_8) }
-        seedFromManifest(role, manifest)
+        seedFromManifest(role, manifest, exclusive)
     }
 
-    fun seedFromManifest(role: NodeRole, manifestJson: String) {
+    fun seedFromManifest(role: NodeRole, manifestJson: String, exclusive: Boolean = true) {
         val root = json.parseToJsonElement(manifestJson).jsonObject
         val roleObj = root["roles"]?.jsonObject?.get(role.name)?.jsonObject
         if (roleObj == null) { SLog.w(TAG, "seed: no manifest entry for $role"); return }
+        pruneSeed(root, role, exclusive)
         val tables = root["tables"]?.jsonObject ?: JsonObject(emptyMap())
         for (tn in roleObj["tables"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()) {
             val spec = tables[tn]?.jsonObject
@@ -222,7 +230,47 @@ class DataStore(
         val docs = roleObj["docs"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
         docSeeder(role, docs)
         db.exec("INSERT OR REPLACE INTO _meta (key, value) VALUES ('seeded_role', ?)", listOf(role.name))
+        db.exec("INSERT OR REPLACE INTO _meta (key, value) VALUES ('seed_exclusive', ?)", listOf(if (exclusive) "1" else "0"))
+        db.exec("INSERT OR REPLACE INTO _meta (key, value) VALUES ('seed_manifest_sha', ?)", listOf(com.hivecore.core.Hashing.sha256Hex(manifestJson.toByteArray())))
         SLog.d(TAG, "seeded $role")
+    }
+
+    /** Removes seed tables and seed documents this phone should no longer hold (see [seedNow]). */
+    private fun pruneSeed(root: JsonObject, role: NodeRole, exclusive: Boolean) {
+        val roles = root["roles"]?.jsonObject ?: return
+        fun listed(key: String, only: NodeRole?) = roles.entries.filter { only == null || it.key == only.name }
+            .flatMap { (_, v) -> v.jsonObject[key]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList() }.toSet()
+        val keepTables = listed("tables", if (exclusive) role else null)
+        val keepDocs = listed("docs", if (exclusive) role else null)
+        for (t in tableNames()) if (isSeedTable(t) && t !in keepTables && sources(t).all { it.seed }) {
+            db.tx { deleteTableNoTx(t) }
+            SLog.d(TAG, "seed: removed $t (not this phone's share)")
+        }
+        val seedDocs = root["docs"]?.jsonObject?.keys ?: emptySet()
+        for (d in runCatching { seedDocLister() }.getOrDefault(emptyList())) if (d.name in seedDocs && d.name !in keepDocs) {
+            deleteDoc(d.id)
+            SLog.d(TAG, "seed: removed document ${d.name} (not this phone's share)")
+        }
+    }
+
+    /**
+     * After an app update whose seed manifest changed: a phone that was seeded before re-seeds the same way (its role
+     * alone, or every role), so it swaps to the new seed data without anyone re-picking its role. Returns true when it
+     * re-seeded. A phone never seeded is left alone.
+     */
+    fun reseedIfManifestChanged(): Boolean {
+        val meta = db.query("SELECT key, value FROM _meta WHERE key IN ('seeded_role', 'seed_exclusive', 'seed_manifest_sha')").associate { it["key"] as String to it["value"] as String? }
+        val role = NodeRole.entries.firstOrNull { it.name == meta["seeded_role"] } ?: return false
+        val manifest = assets.open("seed/seed_manifest.json").use { it.readBytes().toString(Charsets.UTF_8) }
+        if (meta["seed_manifest_sha"] == com.hivecore.core.Hashing.sha256Hex(manifest.toByteArray())) {
+            // same seed: only clear what no longer belongs here (a document an older build could not delete)
+            pruneSeed(json.parseToJsonElement(manifest).jsonObject, roleProvider(), meta["seed_exclusive"] != "0")
+            return false
+        }
+        if (meta["seed_exclusive"] == "0") NodeRole.entries.forEach { seedFromManifest(it, manifest, exclusive = false) }
+        else seedFromManifest(roleProvider(), manifest, exclusive = true)
+        SLog.d(TAG, "seed manifest changed: re-seeded (was $role)")
+        return true
     }
 
     private fun applyManifest(table: String, spec: JsonObject) {

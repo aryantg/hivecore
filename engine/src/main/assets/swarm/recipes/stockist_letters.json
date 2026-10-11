@@ -1,0 +1,87 @@
+{
+  "id": "stockist_letters",
+  "version": "1",
+  "title": "Stockist letters",
+  "produces": "A personalised letter for each stockist with its FY2025 and FY2026 sales and average payment days, and a polite reminder for anyone paying slower than 50 days; the letters are written in parallel across the phones",
+  "axis": "shard",
+  "merge": "concat",
+  "input": "table",
+  "itemKinds": [
+    "row"
+  ],
+  "sink": "table",
+  "table": "t_job_stockist_letters",
+  "replicate": "none",
+  "source": {
+    "table": "stockists",
+    "key": [
+      "stockist_id",
+      "town",
+      "branch"
+    ],
+    "by": [
+      "fiscal_year"
+    ],
+    "sum": [
+      "stockist_sales"
+    ],
+    "avg": [
+      "avg_payment_days"
+    ],
+    "where": {
+      "fiscal_year": [
+        "FY2025",
+        "FY2026"
+      ]
+    },
+    "limit": 64
+  },
+  "stages": [
+    {
+      "id": "letter",
+      "op": "LLM_MAP",
+      "params": {
+        "template": "You write for Kavira Pharmaceuticals, a small Indian pharma company. Write a short, warm business letter to the stockist described below, quoting its sales for each fiscal year exactly as given (the figures are rupees) and its average payment days. If the average payment days are above 50, add a polite reminder to settle invoices sooner; otherwise thank them for paying on time. Invent no numbers.\n\n{item}",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "greeting": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "body": {
+              "type": "string",
+              "maxLength": 900
+            },
+            "payment_note": {
+              "type": "string",
+              "maxLength": 240
+            },
+            "closing": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "greeting",
+            "body",
+            "closing"
+          ]
+        },
+        "maxTokens": 450,
+        "unitMs": 8500
+      }
+    }
+  ],
+  "outputSchema": [
+    {
+      "name": "item",
+      "type": "TEXT",
+      "identifier": true
+    },
+    {
+      "name": "output",
+      "type": "TEXT"
+    }
+  ]
+}

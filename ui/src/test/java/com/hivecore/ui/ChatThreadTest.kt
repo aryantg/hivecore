@@ -17,7 +17,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The chat Home's conversation: bubbles in order, the turn in flight, suggestions and the policy pill. */
+/** The chat Home's conversation: bubbles in order, the turn in flight, suggestions and the policy setting. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatThreadTest {
     private val port = FakeAskPort()
@@ -39,10 +39,7 @@ class ChatThreadTest {
         assertEquals("count the photos", s.inFlight)
         assertEquals(listOf(ChatTurn.User::class, ChatTurn.Typing::class), s.thread.map { it::class })
         settle()
-        val plan = vm.state.value.thread.last() as ChatTurn.Plan
-        assertEquals(null, plan.running)
-
-        vm.choose(RunMode.LOCAL); settle()
+        assertEquals("the plan starts LOCAL without a tap", listOf(RunMode.LOCAL), port.runs.map { it.second })
         val done = vm.state.value
         assertEquals(null, done.inFlight)
         assertEquals(listOf(ChatTurn.User::class, ChatTurn.Answer::class), done.thread.map { it::class })
@@ -62,7 +59,8 @@ class ChatThreadTest {
         vm.setRequest("show every salary"); vm.submit(); settle()
         assertTrue(vm.state.value.thread.last() is ChatTurn.Refused)
 
-        vm.setRequest("count the photos"); vm.submit(); settle()
+        port.delayMs = 10_000
+        vm.setRequest("count the photos"); vm.submit(); runCurrent()
         vm.cancel()
         assertEquals("count the photos", vm.state.value.request)
         assertEquals(null, vm.state.value.inFlight)
@@ -72,8 +70,9 @@ class ChatThreadTest {
         val vm = vm()
         var opened: String? = null
         vm.openRecipe = { opened = it }
-        val jobs = AskSuggestions.DEFAULT.single { it.kind == Suggestion.Kind.JOBS }
-        vm.useSuggestion(jobs)
+        val jobs = AskSuggestions.DEFAULT.filter { it.kind == Suggestion.Kind.JOBS }
+        assertEquals(listOf("stockist_letters", "photo_text"), jobs.map { it.recipeId })
+        jobs.forEach { vm.useSuggestion(it) }
         assertEquals("photo_text", opened)
         assertTrue("a JOBS suggestion does not plan", port.planned.isEmpty())
 
@@ -90,11 +89,31 @@ class ChatThreadTest {
         assertTrue(vm.state.value.thread.isEmpty())
     }
 
-    @Test fun thePolicyPillWritesTheSetting() = runTest {
+    @Test fun setPolicyWritesTheSetting() = runTest {
         val prefs = MemoryPrefs()
         val vm = AskViewModel(port, prefs, backgroundScope)
         vm.setPolicy(CloudPolicy.FASTEST)
         assertEquals(CloudPolicy.FASTEST.key, prefs.getString(SettingsKeys.CLOUD_POLICY, null))
         assertEquals(CloudPolicy.FASTEST, vm.state.value.policy)
+    }
+}
+
+/** The deck in the chat: the suggestion that asks for one, and the presenter state. */
+@OptIn(ExperimentalCoroutinesApi::class)
+class DeckInChatTest {
+    @Test fun theFirstSuggestionAsksForTheDeck() {
+        val s = AskSuggestions.DEFAULT.first()
+        assertEquals(Suggestion.Kind.ASK, s.kind)
+        assertEquals(AskSuggestions.DECK_REQUEST, s.request)
+        assertEquals(6, AskSuggestions.DEFAULT.size)
+    }
+
+    @Test fun presentAndCloseDeck() = runTest {
+        val vm = AskViewModel(FakeAskPort(), MemoryPrefs(), backgroundScope, clock = { 1_000L })
+        val deck = com.hivecore.ui.screens.SampleDeck.DECK
+        vm.present(deck)
+        assertEquals(deck, vm.state.value.presenting)
+        vm.closeDeck()
+        assertEquals(null, vm.state.value.presenting)
     }
 }

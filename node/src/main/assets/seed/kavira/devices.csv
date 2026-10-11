@@ -1,0 +1,205 @@
+device_id,assigned_employee_id,designation,branch,usually_at,tier,ram_gb,storage_gb,chipset_class,has_npu,android_version,purchased_year
+PH-001,KVR-0001,Area Sales Manager,BLR,Field,upper,8,128,upper-mid,True,14,2025
+PH-002,KVR-0002,Area Sales Manager,BLR,Field,flagship,12,256,flagship,True,14,2024
+PH-003,KVR-0003,Area Sales Manager,BLR,Field,upper,8,128,upper-mid,True,15,2022
+PH-004,KVR-0004,Area Sales Manager,BLR,Field,upper,8,128,upper-mid,True,15,2023
+PH-005,KVR-0005,Principal Medical Representative,BLR,Field,entry,4,64,entry,False,15,2023
+PH-006,KVR-0006,Senior Medical Representative,BLR,Field,entry,4,64,entry,False,15,2025
+PH-007,KVR-0007,Senior Medical Representative,BLR,Field,mid,6,128,mid-range,False,15,2024
+PH-008,KVR-0008,Principal Medical Representative,BLR,Field,mid,6,128,mid-range,False,16,2024
+PH-009,KVR-0009,Senior Medical Representative,BLR,Field,mid,6,128,mid-range,False,15,2025
+PH-010,KVR-0010,Senior Medical Representative,BLR,Field,entry,4,64,entry,False,15,2022
+PH-011,KVR-0011,Senior Medical Representative,BLR,Field,entry,4,64,entry,False,13,2025
+PH-012,KVR-0012,Senior Medical Representative,BLR,Field,entry,4,64,entry,False,13,2024
+PH-013,KVR-0013,Senior Medical Representative,BLR,Field,mid,6,128,mid-range,False,15,2025
+PH-014,KVR-0014,Senior Medical Representative,BLR,Field,entry,4,64,entry,False,14,2024
+PH-015,KVR-0015,Senior Medical Representative,BLR,Field,upper,8,128,upper-mid,True,14,2022
+PH-016,KVR-0016,Senior Medical Representative,BLR,Field,mid,6,128,mid-range,False,15,2023
+PH-017,KVR-0017,Senior Medical Representative,BLR,Field,mid,6,128,mid-range,False,15,2023
+PH-018,KVR-0018,Senior Medical Representative,BLR,Field,mid,6,128,mid-range,False,15,2023
+PH-019,KVR-0019,Principal Medical Representative,BLR,Field,entry,4,64,entry,False,13,2024
+PH-020,KVR-0020,Senior Medical Representative,BLR,Field,mid,6,128,mid-range,False,16,2023
+PH-021,KVR-0021,Principal Medical Representative,BLR,Field,mid,6,128,mid-range,False,16,2023
+PH-022,KVR-0022,Senior Medical Representative,BLR,Field,entry,4,64,entry,False,15,2023
+PH-023,KVR-0023,Principal Medical Representative,BLR,Field,entry,4,64,entry,False,15,2023
+PH-024,KVR-0024,Senior Medical Representative,BLR,Field,upper,8,128,upper-mid,True,15,2024
+PH-025,KVR-0025,Principal Medical Representative,BLR,Field,entry,4,64,entry,False,13,2024
+PH-026,KVR-0026,Senior Medical Representative,BLR,Field,entry,4,64,entry,False,15,2025
+PH-027,KVR-0027,Senior Medical Representative,BLR,Field,entry,4,64,entry,False,14,2022
+PH-028,KVR-0028,Senior Medical Representative,BLR,Field,upper,8,128,upper-mid,True,14,2023
+PH-029,KVR-0029,Principal Medical Representative,BLR,Field,upper,8,128,upper-mid,True,14,2025
+PH-030,KVR-0030,Senior Medical Representative,BLR,Field,mid,6,128,mid-range,False,14,2025
+PH-031,KVR-0031,Senior Medical Representative,BLR,Field,entry,4,64,entry,False,14,2024
+PH-032,KVR-0032,Principal Medical Representative,BLR,Field,entry,4,64,entry,False,15,2022
+PH-033,KVR-0033,Senior Medical Representative,BLR,Field,mid,6,128,mid-range,False,16,2023
+PH-034,KVR-0034,Principal Medical Representative,BLR,Field,upper,8,128,upper-mid,True,15,2022
+PH-035,KVR-0035,Senior Medical Representative,BLR,Field,mid,6,128,mid-range,False,16,2025
+PH-036,KVR-0036,Senior Medical Representative,BLR,Field,mid,6,128,mid-range,False,14,2024
+PH-037,KVR-0037,Principal Medical Representative,BLR,Field,entry,4,64,entry,False,15,2025
+PH-038,KVR-0038,Principal Medical Representative,BLR,Field,entry,4,64,entry,False,14,2025
+PH-039,KVR-0039,Senior Medical Representative,BLR,Field,mid,6,128,mid-range,False,16,2025
+PH-040,KVR-0040,Senior Medical Representative,BLR,Field,entry,4,64,entry,False,14,2025
+PH-041,KVR-0041,Senior Medical Representative,BLR,Field,mid,6,128,mid-range,False,15,2023
+PH-042,KVR-0042,Senior Medical Representative,BLR,Field,entry,4,64,entry,False,14,2022
+PH-043,KVR-0043,Senior Medical Representative,BLR,Field,mid,6,128,mid-range,False,15,2024
+PH-044,KVR-0044,Senior Medical Representative,BLR,Field,entry,4,64,entry,False,13,2022
+PH-045,KVR-0045,Senior Medical Representative,BLR,Field,mid,6,128,mid-range,False,14,2023
+PH-046,KVR-0046,Senior Medical Representative,BLR,Field,entry,4,64,entry,False,15,2024
+PH-047,KVR-0047,Senior Medical Representative,BLR,Field,entry,4,64,entry,False,15,2025
+PH-048,KVR-0048,Medical Representative,BLR,Field,mid,6,128,mid-range,False,16,2022
+PH-049,KVR-0049,Medical Representative,BLR,Field,mid,6,128,mid-range,False,16,2025
+PH-050,KVR-0050,Medical Representative,BLR,Field,entry,4,64,entry,False,13,2024
+PH-051,KVR-0051,Medical Representative,BLR,Field,mid,6,128,mid-range,False,14,2024
+PH-052,KVR-0052,Medical Representative,BLR,Field,mid,6,128,mid-range,False,14,2022
+PH-053,KVR-0053,Area Sales Manager,CHN,Field,upper,8,128,upper-mid,True,14,2022
+PH-054,KVR-0054,Area Sales Manager,CHN,Field,flagship,12,256,flagship,True,14,2022
+PH-055,KVR-0055,Area Sales Manager,CHN,Field,upper,8,128,upper-mid,True,14,2024
+PH-056,KVR-0056,Area Sales Manager,CHN,Field,upper,8,128,upper-mid,True,16,2022
+PH-057,KVR-0057,Senior Medical Representative,CHN,Field,mid,6,128,mid-range,False,14,2025
+PH-058,KVR-0058,Senior Medical Representative,CHN,Field,entry,4,64,entry,False,14,2022
+PH-059,KVR-0059,Senior Medical Representative,CHN,Field,entry,4,64,entry,False,15,2023
+PH-060,KVR-0060,Senior Medical Representative,CHN,Field,upper,8,128,upper-mid,True,14,2022
+PH-061,KVR-0061,Senior Medical Representative,CHN,Field,entry,4,64,entry,False,14,2022
+PH-062,KVR-0062,Senior Medical Representative,CHN,Field,mid,6,128,mid-range,False,16,2024
+PH-063,KVR-0063,Senior Medical Representative,CHN,Field,entry,4,64,entry,False,14,2022
+PH-064,KVR-0064,Senior Medical Representative,CHN,Field,mid,6,128,mid-range,False,16,2024
+PH-065,KVR-0065,Senior Medical Representative,CHN,Field,entry,4,64,entry,False,14,2022
+PH-066,KVR-0066,Principal Medical Representative,CHN,Field,mid,6,128,mid-range,False,15,2023
+PH-067,KVR-0067,Principal Medical Representative,CHN,Field,mid,6,128,mid-range,False,16,2023
+PH-068,KVR-0068,Senior Medical Representative,CHN,Field,mid,6,128,mid-range,False,15,2022
+PH-069,KVR-0069,Senior Medical Representative,CHN,Field,mid,6,128,mid-range,False,14,2025
+PH-070,KVR-0070,Senior Medical Representative,CHN,Field,upper,8,128,upper-mid,True,16,2024
+PH-071,KVR-0071,Senior Medical Representative,CHN,Field,entry,4,64,entry,False,13,2025
+PH-072,KVR-0072,Principal Medical Representative,CHN,Field,entry,4,64,entry,False,15,2022
+PH-073,KVR-0073,Senior Medical Representative,CHN,Field,mid,6,128,mid-range,False,15,2022
+PH-074,KVR-0074,Senior Medical Representative,CHN,Field,mid,6,128,mid-range,False,15,2024
+PH-075,KVR-0075,Senior Medical Representative,CHN,Field,upper,8,128,upper-mid,True,14,2022
+PH-076,KVR-0076,Principal Medical Representative,CHN,Field,mid,6,128,mid-range,False,15,2024
+PH-077,KVR-0077,Senior Medical Representative,CHN,Field,upper,8,128,upper-mid,True,16,2025
+PH-078,KVR-0078,Senior Medical Representative,CHN,Field,upper,8,128,upper-mid,True,15,2024
+PH-079,KVR-0079,Senior Medical Representative,CHN,Field,entry,4,64,entry,False,14,2024
+PH-080,KVR-0080,Principal Medical Representative,CHN,Field,mid,6,128,mid-range,False,16,2022
+PH-081,KVR-0081,Senior Medical Representative,CHN,Field,mid,6,128,mid-range,False,16,2022
+PH-082,KVR-0082,Principal Medical Representative,CHN,Field,entry,4,64,entry,False,15,2022
+PH-083,KVR-0083,Principal Medical Representative,CHN,Field,entry,4,64,entry,False,14,2023
+PH-084,KVR-0084,Senior Medical Representative,CHN,Field,entry,4,64,entry,False,13,2025
+PH-085,KVR-0085,Senior Medical Representative,CHN,Field,entry,4,64,entry,False,13,2022
+PH-086,KVR-0086,Principal Medical Representative,CHN,Field,upper,8,128,upper-mid,True,16,2024
+PH-087,KVR-0087,Principal Medical Representative,CHN,Field,upper,8,128,upper-mid,True,16,2022
+PH-088,KVR-0088,Senior Medical Representative,CHN,Field,upper,8,128,upper-mid,True,15,2025
+PH-089,KVR-0089,Principal Medical Representative,CHN,Field,mid,6,128,mid-range,False,16,2025
+PH-090,KVR-0090,Medical Representative,CHN,Field,mid,6,128,mid-range,False,16,2025
+PH-091,KVR-0091,Medical Representative,CHN,Field,mid,6,128,mid-range,False,16,2022
+PH-092,KVR-0092,Medical Representative,CHN,Field,mid,6,128,mid-range,False,15,2023
+PH-093,KVR-0093,Medical Representative,CHN,Field,entry,4,64,entry,False,14,2022
+PH-094,KVR-0094,Medical Representative,CHN,Field,mid,6,128,mid-range,False,15,2022
+PH-095,KVR-0095,Area Sales Manager,KOC,Field,flagship,12,256,flagship,True,14,2025
+PH-096,KVR-0096,Area Sales Manager,KOC,Field,flagship,12,256,flagship,True,14,2023
+PH-097,KVR-0097,Medical Representative,KOC,Field,entry,4,64,entry,False,14,2025
+PH-098,KVR-0098,Medical Representative,KOC,Field,mid,6,128,mid-range,False,15,2024
+PH-099,KVR-0099,Medical Representative,KOC,Field,entry,4,64,entry,False,14,2024
+PH-100,KVR-0100,Medical Representative,KOC,Field,mid,6,128,mid-range,False,16,2022
+PH-101,KVR-0101,Medical Representative,KOC,Field,mid,6,128,mid-range,False,15,2023
+PH-102,KVR-0102,Medical Representative,KOC,Field,entry,4,64,entry,False,13,2023
+PH-103,KVR-0103,Medical Representative,KOC,Field,entry,4,64,entry,False,15,2024
+PH-104,KVR-0104,Medical Representative,KOC,Field,mid,6,128,mid-range,False,16,2022
+PH-105,KVR-0105,Medical Representative,KOC,Field,mid,6,128,mid-range,False,15,2022
+PH-106,KVR-0106,Medical Representative,KOC,Field,entry,4,64,entry,False,13,2023
+PH-107,KVR-0107,Medical Representative,KOC,Field,mid,6,128,mid-range,False,16,2022
+PH-108,KVR-0108,Medical Representative,KOC,Field,entry,4,64,entry,False,14,2022
+PH-109,KVR-0109,Medical Representative,KOC,Field,entry,4,64,entry,False,14,2023
+PH-110,KVR-0110,Medical Representative,KOC,Field,mid,6,128,mid-range,False,16,2025
+PH-111,KVR-0111,Medical Representative,KOC,Field,entry,4,64,entry,False,14,2023
+PH-112,KVR-0112,Medical Representative,KOC,Field,entry,4,64,entry,False,13,2024
+PH-113,KVR-0113,Medical Representative,KOC,Field,entry,4,64,entry,False,14,2024
+PH-114,KVR-0114,Medical Representative,KOC,Field,mid,6,128,mid-range,False,14,2025
+PH-115,KVR-0115,Medical Representative,KOC,Field,upper,8,128,upper-mid,True,16,2025
+PH-116,KVR-0116,Medical Representative,KOC,Field,mid,6,128,mid-range,False,14,2022
+PH-117,KVR-0117,Medical Representative,KOC,Field,mid,6,128,mid-range,False,15,2024
+PH-118,KVR-0118,Medical Representative,KOC,Field,mid,6,128,mid-range,False,15,2023
+PH-119,KVR-0119,Medical Representative,KOC,Field,entry,4,64,entry,False,15,2022
+PH-120,KVR-0120,Medical Representative,KOC,Field,entry,4,64,entry,False,14,2023
+PH-121,KVR-0121,Managing Director,BLR,HQ,flagship,12,256,flagship,True,15,2024
+PH-122,KVR-0122,Director - Operations,BLR,HQ,flagship,12,256,flagship,True,15,2025
+PH-123,KVR-0123,Chief Financial Officer,BLR,HQ,flagship,12,256,flagship,True,15,2025
+PH-124,KVR-0124,National Sales Manager,BLR,HQ,upper,8,128,upper-mid,True,14,2023
+PH-125,KVR-0125,Branch Sales Manager,BLR,Branch office,upper,8,128,upper-mid,True,14,2023
+PH-126,KVR-0126,Branch Sales Manager,CHN,Branch office,upper,8,128,upper-mid,True,15,2023
+PH-127,KVR-0127,Branch Sales Manager,KOC,Branch office,upper,8,128,upper-mid,True,15,2025
+PH-128,KVR-0128,Marketing Manager,BLR,HQ,upper,8,128,upper-mid,True,14,2023
+PH-129,KVR-0129,Product Manager,BLR,HQ,upper,8,128,upper-mid,True,14,2025
+PH-130,KVR-0130,Product Manager,BLR,HQ,upper,8,128,upper-mid,True,14,2023
+PH-131,KVR-0131,Product Manager,BLR,HQ,flagship,12,256,flagship,True,15,2024
+PH-132,KVR-0132,Marketing Executive,BLR,HQ,mid,6,128,mid-range,False,14,2024
+PH-133,KVR-0133,Marketing Executive,BLR,HQ,mid,6,128,mid-range,False,15,2025
+PH-134,KVR-0134,HR Manager,BLR,HQ,flagship,12,256,flagship,True,14,2023
+PH-135,KVR-0135,HR Executive,BLR,HQ,upper,8,128,upper-mid,True,16,2023
+PH-136,KVR-0136,HR Executive,BLR,HQ,mid,6,128,mid-range,False,16,2024
+PH-137,KVR-0137,Payroll Executive,BLR,HQ,mid,6,128,mid-range,False,15,2024
+PH-138,KVR-0138,Finance Manager,BLR,HQ,upper,8,128,upper-mid,True,15,2023
+PH-139,KVR-0139,Accounts Executive,BLR,HQ,entry,4,64,entry,False,13,2023
+PH-140,KVR-0140,Accounts Executive,BLR,HQ,mid,6,128,mid-range,False,16,2023
+PH-141,KVR-0141,Accounts Executive,BLR,HQ,entry,4,64,entry,False,15,2023
+PH-142,KVR-0142,Branch Accountant,BLR,Branch office,mid,6,128,mid-range,False,14,2023
+PH-143,KVR-0143,Branch Accountant,CHN,Branch office,mid,6,128,mid-range,False,15,2024
+PH-144,KVR-0144,Branch Accountant,KOC,Branch office,mid,6,128,mid-range,False,16,2024
+PH-145,KVR-0145,Branch Operations Executive,BLR,Branch office,entry,4,64,entry,False,15,2023
+PH-146,KVR-0146,Branch Operations Executive,BLR,Branch office,mid,6,128,mid-range,False,15,2024
+PH-147,KVR-0147,Branch Operations Executive,BLR,Branch office,mid,6,128,mid-range,False,15,2024
+PH-148,KVR-0148,Branch Operations Executive,BLR,Branch office,mid,6,128,mid-range,False,15,2024
+PH-149,KVR-0149,Branch Operations Executive,BLR,Branch office,mid,6,128,mid-range,False,14,2023
+PH-150,KVR-0150,Branch Operations Executive,BLR,Branch office,entry,4,64,entry,False,13,2023
+PH-151,KVR-0151,Branch Operations Executive,CHN,Branch office,mid,6,128,mid-range,False,15,2023
+PH-152,KVR-0152,Branch Operations Executive,CHN,Branch office,upper,8,128,upper-mid,True,15,2024
+PH-153,KVR-0153,Branch Operations Executive,CHN,Branch office,mid,6,128,mid-range,False,14,2023
+PH-154,KVR-0154,Branch Operations Executive,CHN,Branch office,mid,6,128,mid-range,False,15,2025
+PH-155,KVR-0155,Branch Operations Executive,CHN,Branch office,mid,6,128,mid-range,False,15,2022
+PH-156,KVR-0156,Branch Operations Executive,CHN,Branch office,mid,6,128,mid-range,False,14,2022
+PH-157,KVR-0157,Branch Operations Executive,KOC,Branch office,entry,4,64,entry,False,15,2024
+PH-158,KVR-0158,Branch Operations Executive,KOC,Branch office,entry,4,64,entry,False,15,2025
+PH-159,KVR-0159,Branch Operations Executive,KOC,Branch office,upper,8,128,upper-mid,True,14,2025
+PH-160,KVR-0160,Branch Operations Executive,KOC,Branch office,mid,6,128,mid-range,False,15,2025
+PH-161,KVR-0161,IT Manager,BLR,HQ,upper,8,128,upper-mid,True,14,2025
+PH-162,KVR-0162,IT Executive,BLR,HQ,mid,6,128,mid-range,False,14,2023
+PH-163,KVR-0163,Tender Manager,CHN,Branch office,upper,8,128,upper-mid,True,15,2022
+PH-164,KVR-0164,Business Development Executive,BLR,HQ,upper,8,128,upper-mid,True,15,2025
+PH-165,KVR-0165,Business Development Executive,BLR,HQ,upper,8,128,upper-mid,True,16,2022
+PH-166,KVR-0166,R&D Manager,BLR,Plant,upper,8,128,upper-mid,True,16,2022
+PH-167,KVR-0167,Formulation Scientist,BLR,Plant,mid,6,128,mid-range,False,14,2025
+PH-168,KVR-0168,Formulation Scientist,BLR,Plant,entry,4,64,entry,False,15,2023
+PH-169,KVR-0169,Formulation Scientist,BLR,Plant,mid,6,128,mid-range,False,15,2024
+PH-170,KVR-0170,Regulatory Executive,BLR,Plant,mid,6,128,mid-range,False,15,2023
+PH-171,KVR-0171,Plant Head,BLR,Plant,upper,8,128,upper-mid,True,16,2024
+PH-172,KVR-0172,Production Manager,BLR,Plant,upper,8,128,upper-mid,True,16,2023
+PH-173,KVR-0173,Production Supervisor,BLR,Plant,entry,4,64,entry,False,15,2022
+PH-174,KVR-0174,Production Supervisor,BLR,Plant,upper,8,128,upper-mid,True,16,2022
+PH-175,KVR-0175,Production Supervisor,BLR,Plant,mid,6,128,mid-range,False,14,2022
+PH-176,KVR-0176,Production Supervisor,BLR,Plant,entry,4,64,entry,False,15,2023
+PH-177,KVR-0177,Production Supervisor,BLR,Plant,mid,6,128,mid-range,False,14,2022
+PH-178,KVR-0178,Production Supervisor,BLR,Plant,mid,6,128,mid-range,False,14,2022
+PH-179,KVR-0249,QC Manager,BLR,Plant,flagship,12,256,flagship,True,16,2023
+PH-180,KVR-0250,QC Chemist,BLR,Plant,mid,6,128,mid-range,False,14,2024
+PH-181,KVR-0251,QC Chemist,BLR,Plant,entry,4,64,entry,False,13,2023
+PH-182,KVR-0252,QC Chemist,BLR,Plant,mid,6,128,mid-range,False,14,2023
+PH-183,KVR-0253,QC Chemist,BLR,Plant,mid,6,128,mid-range,False,16,2022
+PH-184,KVR-0254,QC Chemist,BLR,Plant,mid,6,128,mid-range,False,14,2023
+PH-185,KVR-0255,QC Chemist,BLR,Plant,mid,6,128,mid-range,False,16,2022
+PH-186,KVR-0256,QC Chemist,BLR,Plant,mid,6,128,mid-range,False,14,2022
+PH-187,KVR-0257,QC Chemist,BLR,Plant,mid,6,128,mid-range,False,16,2025
+PH-188,KVR-0258,QC Chemist,BLR,Plant,mid,6,128,mid-range,False,14,2023
+PH-189,KVR-0259,QC Chemist,BLR,Plant,mid,6,128,mid-range,False,14,2025
+PH-190,KVR-0260,QA Manager,BLR,Plant,upper,8,128,upper-mid,True,15,2024
+PH-191,KVR-0261,QA Executive,BLR,Plant,mid,6,128,mid-range,False,15,2025
+PH-192,KVR-0262,QA Executive,BLR,Plant,upper,8,128,upper-mid,True,16,2025
+PH-193,KVR-0263,QA Executive,BLR,Plant,mid,6,128,mid-range,False,16,2024
+PH-194,KVR-0264,QA Executive,BLR,Plant,mid,6,128,mid-range,False,16,2025
+PH-195,KVR-0265,QA Executive,BLR,Plant,mid,6,128,mid-range,False,15,2022
+PH-196,KVR-0266,Maintenance Engineer,BLR,Plant,mid,6,128,mid-range,False,16,2025
+PH-197,KVR-0267,Maintenance Engineer,BLR,Plant,mid,6,128,mid-range,False,16,2023
+PH-198,KVR-0274,Stores Executive,BLR,Plant,mid,6,128,mid-range,False,15,2025
+PH-199,KVR-0275,Stores Executive,BLR,Plant,mid,6,128,mid-range,False,15,2025
+PH-200,KVR-0276,Stores Executive,BLR,Plant,mid,6,128,mid-range,False,14,2025
+PH-201,KVR-0277,Stores Executive,BLR,Plant,entry,4,64,entry,False,13,2022
+PH-202,KVR-0278,Admin Executive,BLR,HQ,upper,8,128,upper-mid,True,15,2023
+PH-203,KVR-0279,Admin Executive,BLR,HQ,mid,6,128,mid-range,False,15,2022
+PH-204,KVR-0280,Admin Executive,BLR,HQ,upper,8,128,upper-mid,True,15,2024

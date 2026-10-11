@@ -78,6 +78,7 @@ import com.hivecore.mesh.AndroidBtEndpoint
 import com.hivecore.mesh.BtRfcommTransport
 import com.hivecore.mesh.DataChannelTransport
 import com.hivecore.mesh.HelloBody
+import com.hivecore.mesh.LanPairPing
 import com.hivecore.mesh.LanTransport
 import com.hivecore.mesh.LinkProbe
 import com.hivecore.mesh.MeshJson
@@ -154,6 +155,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
@@ -198,13 +200,17 @@ object AppWiring {
         // ---- identity and storage (always) ----
         val signer: Signer = KeystoreSigner()
         val selfId = com.hivecore.mesh.Wire.nodeIdOf(signer.publicKeyB64) ?: error("the node key is not base64")
-        val selfName = { prefs.getString(PREF_NODE_NAME, null)?.takeIf { it.isNotBlank() } ?: Build.MODEL.take(16) }
+        // Same-model phones all report the same Build.MODEL, so the default name carries a short node-id suffix.
+        val selfName = { prefs.getString(PREF_NODE_NAME, null)?.takeIf { it.isNotBlank() } ?: "${Build.MODEL.take(16)} ${selfId.take(4)}" }
         val groupId = { prefs.getString(PREF_GROUP_ID, null)?.takeIf { it.isNotBlank() } ?: DEFAULT_GROUP }
         val db = AndroidSqlDb.open(File(app.filesDir, "hivecore.db"))
         val roleOf = { NodeRole.entries.firstOrNull { it.name == prefs.getString(PREF_NODE_ROLE, null) } ?: NodeRole.SALES }
         val store = DataStore(db, AssetReader { app.assets.open(it) }, roleProvider = roleOf).also { it.migrate() }
         val docStore = DocStore(db)
         store.docLister = { docStore.docs() }
+        store.docDeleter = { id -> docStore.delete(id) }
+        store.seedDocLister = { docStore.records().filter { it.seed }.map { it.def } }
+        store.docResetter = { docStore.deleteNonSeed() }
         val index = Bm25Index { docStore.chunks() }
         val ledger = Ledger(db, signer)
         val peerStore = PeerStore(db)
@@ -476,17 +482,19 @@ object AppWiring {
                     codec = ImageIo(), outDir = File(app.filesDir, "out"), vlmAsk = vlmAsk, ocr = ocr,
                     audioDecoder = AndroidAudioDecoder(), frames = AndroidFrameSource(),
                     imageGenerator = sd?.let { pipe -> ImageGenerator { params -> pipe.generate(params) } },
+                    publish = { f -> graph.node.blobs?.put(f) },
                     bench = p?.let { pl -> Bench(registry, pl, pl::runtimeFor, batteryTempC = { device?.batteryTempC?.value }) })
                 SwarmExecutors.build(env, seams) + LlmMapExecutor(llm)
             },
             chooser = chooser, ledger = ledger, docIndex = index, docAnswerer = LlmDocAnswerer(llm),
-            blobDir = File(app.filesDir, "blobs"), nameOf = { id -> router.peerName(id) ?: id.take(8) },
+            blobDir = File(app.filesDir, "blobs"), deckDir = File(app.filesDir, "decks"), nameOf = { id -> router.peerName(id) ?: id.take(8) },
             p50 = { benchTable.p50(catalog) }, hidden = { dataPort.hiddenTables() },
             peerCatalogs = { router.pinnedNodeIds().mapNotNull { router.lastHello(it)?.catalog } },
             recipeDefs = recipes, clock = clock,
             privateTables = { store.privateTables() }, privateDocs = { store.privateDocs() },
             journal = journal, memo = memo, escalator = escalator,
             modelItems = { (registry.installed().map { it.id } + listOfNotNull(ModelPoolImpl.LLM_QAIRT_ID.takeIf { llm.backend.value != null })).distinct().map { JsonPrimitive(it) } },
+            tableItems = { src -> com.hivecore.node.data.RecipeItems(store).items(src) },
             readyFor = { cap -> coordinators.values.flatMap { it.ready(cap) }.toSet().takeIf { it.isNotEmpty() } },
             unitMsOf = { node, cap -> catalog.preferred(cap)?.let { e -> graph.node.beacon?.profileOf(node)?.p50?.get(e.modelId) ?: e.unitMsP50.toDouble() } },
             allowMobileData = { prefs.getBoolean(SettingsKeys.MOBILE_DATA_BLOBS, false) },
@@ -500,7 +508,9 @@ object AppWiring {
         graph = SwarmGraph.build(deps)
         val node = graph.node
         beaconRef.set(node.beacon)
-        registeredOps.value = graph.executors.flatMap { it.ops }.toSet()
+        // the owner ops (AGG, DOC) run on the node's own AggExecutor, which SwarmNode.build registers itself (first phone
+        // pass of a graph plan: without them the compiler refused every pattern with "op AGG is not in the registry")
+        registeredOps.value = graph.executors.flatMap { it.ops }.toSet() + setOf(com.hivecore.core.Op.AGG, com.hivecore.core.Op.DOC)
         if (authoriser != null) {
             node.onPlanSeen = authoriser::onPlanSeen
             // P10 covers tasks from other phones; this phone's own chunks come from its own commander in-process and
@@ -555,11 +565,14 @@ object AppWiring {
         // gate finding: without it a phone registers but never finds the others), so the lock is held from the
         // moment the LAN transport runs, not only while the worker service is on.
         var discoveryLock: WifiManager.MulticastLock? = null
+        // "Ping nearby" (Swarm screen): a UDP pair request to every phone on the Wi-Fi; listens from the moment the mesh runs
+        val pairPing = if (Features.meshTrust) LanPairPing() else null
         suspend fun startRouter() {
             if (routerUp.value) return
             if (Features.meshTrust && discoveryLock == null)
                 discoveryLock = runCatching { wifi?.createMulticastLock("hivecore-discovery")?.apply { setReferenceCounted(false); acquire() } }.getOrNull()
             runCatching { router.start(); routerUp.value = true }.onFailure { warn("mesh start failed: ${it.message}") }
+            pairPing?.let { pp -> runCatching { withContext(Dispatchers.IO) { pp.start(selfName()) } }.onFailure { warn("pair ping listener: ${it.message}") } }
         }
         WorkerService.keepalive = object : WorkerService.Keepalive {
             private var lock: WifiManager.MulticastLock? = null
@@ -575,19 +588,26 @@ object AppWiring {
         val profiles = { node.beacon?.snapshot() ?: emptyList() }
         val nameOf = { id: String -> if (id == selfId) selfName() else router.peerName(id) ?: id.take(8) }
         val swarmPort = if (Features.meshTrust) SwarmPortImpl(selfId, selfName, router, peerStore, rosterStore, admin, pairing, { profiles().filter { it.nodeId != selfId } },
-            groupId, scope, warnings, onInviteOpened = { inv -> relay?.let { r -> RelayPairingChannel.host(r, inv.token).onFailure { warn("relay invite: ${it.message}") } } }, clock)
+            groupId, scope, warnings, onInviteOpened = { inv -> relay?.let { r -> RelayPairingChannel.host(r, inv.token).onFailure { warn("relay invite: ${it.message}") } } }, clock,
+            pairPing = pairPing)
             .also { swarmPortRef = it } else FakeSwarmPort.sample()
         val modelsPort = if (Features.runtime && capBench != null && pool is CapabilityPool)
             ModelsPortImpl(selfId, selfName(), { catalog }, pool, registry, capBench, benchTable, profiles, nameOf, prefs, scope,
                 downloader = ModelDownloader(ModelRegistryImpl.defaultRoots(app)) { (registry as? ModelRegistryImpl)?.refresh() }) else FakeModelsPort.sample()
-        val tiered = if (Features.graph && patterns != null) TieredPlannerImpl(selfId, SwarmRouterImpl(), PlannerImpl(chooser, patterns, clock), compiler, t2,
+        val tiered = if (Features.graph && patterns != null) TieredPlannerImpl(selfId, SwarmRouterImpl(), PlannerImpl(chooser, patterns, clock, availableOps = { registeredOps.value }), compiler, t2,
             t2First = { prefs.getBoolean(PREF_T2_FIRST, false) }, clock = clock, patterns = patterns) else null
         val askPort = if (tiered != null) AskPortImpl(selfId, selfName(), tiered, node, node, { graph.catalogs() },
             { CapabilitySummary(catalog.capabilities + runtimeCaps(router, selfId), registeredOps.value) }, profiles, { catalog.entries }, prices,
-            { AskPortImpl.policyOf(prefs) }, { runCatching { cm?.activeNetwork != null }.getOrDefault(false) }, recipes, escalator, nameOf) else FakeAskPort()
+            { AskPortImpl.policyOf(prefs) }, { runCatching { cm?.activeNetwork != null }.getOrDefault(false) }, recipes, escalator, nameOf, patterns) else FakeAskPort()
         val settingsPort = if (Features.meshTrust || Features.cloud) SettingsPortImpl(keyStore, peerStore, router, ledger, File(app.filesDir, "exports"))
             else FakeSettingsPort()
         val jobRunner: JobRunner = if (Features.split) node else com.hivecore.core.fakes.FakeJobRunner()
+        // an app update with a new seed manifest (the Kavira data) swaps an already-seeded phone to its new share
+        scope.launch(Dispatchers.IO) {
+            runCatching { store.reseedIfManifestChanged() }
+                .onSuccess { if (it) runCatching { router.rebroadcastHello() }.onFailure { e -> SLog.w(TAG, "re-seed hello: ${e.message}") } }
+                .onFailure { warn("re-seed: ${it.message}") }
+        }
         SLog.d(TAG, "wired in ${System.currentTimeMillis() - t0} ms: node ${selfId.take(8)} (${selfName()}), transports ${transports.keys} (always-on $alwaysOn), features ${Features.enabled()}")
         return HiveCoreGraph.Ports(selfId, askPort, jobRunner, swarmPort, graph.policy, modelsPort, registry, pool, store, store,
             if (Features.graph) dataPort else FakeDataPort(), settingsPort, consent, loadRecipes = recipes,

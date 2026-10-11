@@ -85,7 +85,7 @@ class DemoPortImpl(
     override suspend fun seedAll(): Result<String> = runCatching {
         if (store == null && prefs.getBoolean(DemoKeys.DEMO_MODE, false)) return@runCatching "Demo mode: the scripted phones already hold their sample data"
         val s = store ?: error("the data store is not running on this build")
-        withContext(Dispatchers.IO) { NodeRole.entries.forEach { s.seedNow(it) } }
+        withContext(Dispatchers.IO) { NodeRole.entries.forEach { s.seedNow(it, exclusive = false) } }
         afterSeed()
         "Sample data for HR, Sales and Accounts loaded on this phone"
     }
@@ -144,8 +144,10 @@ class DemoPortImpl(
     companion object {
         private const val TAG = "DemoPort"
         private fun label(r: NodeRole) = when (r) { NodeRole.HR -> "HR"; NodeRole.SALES -> "Sales"; NodeRole.ACCOUNTS -> "Accounts" }
-        private val WHAT = mapOf(NodeRole.HR to "the employees table and the onboarding checklist", NodeRole.SALES to "the sales table and the Q3 review deck",
-            NodeRole.ACCOUNTS to "the invoices table")
+        private val WHAT = mapOf(
+            NodeRole.HR to "Kavira's staff directory, compensation, salary history and company phones, the onboarding checklist and the HR access policy",
+            NodeRole.SALES to "Kavira's monthly sales, products, branches, sales force, business events and stockists, and the company snapshot",
+            NodeRole.ACCOUNTS to "Kavira's quarterly financials, receivables and budget vs actual")
 
         /** The plan consent screen's format (PlanConsentScreen.parse): a header, numbered figures, a closing note. */
         const val APPROVAL_DESCRIPTION = "Sales' phone asks for 3 figures from your employees table:\n" +

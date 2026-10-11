@@ -125,7 +125,10 @@ class ChunkDecisions(
         val rows = ArrayList<DecisionRow>()
         var used = 0
         for (batch in batches) {
-            val state = batch.joinToString("\n\n") { c -> "chunk ${c.index}:\n" + chunkState(c) }
+            // the batch shares one prompt: each chunk gets its share of BATCH_STATE_CHARS (phone finding: six 1,500-char
+            // states overflowed the NPU model's prompt, "Input prompt too long", and every vote abstained)
+            val per = maxOf(MIN_CHUNK_STATE_CHARS, BATCH_STATE_CHARS / batch.size)
+            val state = batch.joinToString("\n\n") { c -> "chunk ${c.index}:\n" + chunkState(c, per) }
             val req = DecisionRequest(Templates.MODEL, state, batch.map { Templates.difficulty(it.index, job.op.name) })
             val res = model.decide(req).getOrElse { note("${job.jobId}: difficulty batch failed: ${it.message}; registry replicas kept"); return null }
             used += res.usage.llmCalls
@@ -189,15 +192,15 @@ class ChunkDecisions(
 
     // ------------------------------------------------------------------ helpers
 
-    private fun chunkState(c: Chunk): String {
+    private fun chunkState(c: Chunk, max: Int = STATE_CHARS): String {
         val inline = Canon.canonical(c.params)
         val blobs = if (c.blobs.isEmpty()) "" else "\nitems: ${c.blobs.joinToString { it.take(12) }} (${c.bytes} bytes)"
-        return inline.take(STATE_CHARS) + blobs
+        return inline.take(max) + blobs
     }
 
     private fun verdictState(plan: SplitPlan, c: Chunk, out: JsonElement): String {
-        val schema = plan.job.params["schema"]?.let { "\nSchema:\n" + Canon.canonical(it).take(STATE_CHARS) } ?: ""
-        return "Input:\n" + Canon.canonical(plan.task(c).params).take(STATE_CHARS) + "\nOutput:\n" + Canon.canonical(out).take(STATE_CHARS) + schema
+        val schema = plan.job.params["schema"]?.let { "\nSchema:\n" + Canon.canonical(it).take(VERDICT_PART_CHARS) } ?: ""
+        return "Input:\n" + Canon.canonical(plan.task(c).params).take(VERDICT_PART_CHARS) + "\nOutput:\n" + Canon.canonical(out).take(VERDICT_PART_CHARS) + schema
     }
 
     private fun text(unit: JsonObject): String = (unit["text"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: ""
@@ -231,6 +234,11 @@ class ChunkDecisions(
         const val VERDICT_MIN = 0.7
         const val BATCH = 16
         const val STATE_CHARS = 1_500
+        /** the whole difficulty batch's state: about 700 tokens, well inside the phone model's prompt */
+        const val BATCH_STATE_CHARS = 2_400
+        const val MIN_CHUNK_STATE_CHARS = 120
+        /** each of a verdict's input, output and schema: the three stay near BATCH_STATE_CHARS together */
+        const val VERDICT_PART_CHARS = 700
         /** LLM calls one grouped question costs in Phase 1 (k permuted runs). */
         const val RUNS_PER_GROUP = 3
 

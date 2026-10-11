@@ -87,7 +87,7 @@ class JobsViewModel(
     ) {
         val selected: RecipeDef? get() = recipes.firstOrNull { it.id == selectedId }
         val canRun: Boolean get() = phase != Phase.RUNNING && selected?.let { r ->
-            when (r.input) { "prompt" -> prompt.isNotBlank(); "none" -> true; else -> items.isNotEmpty() }
+            when (r.input) { "prompt" -> prompt.isNotBlank(); "none", "table" -> true; else -> items.isNotEmpty() }
         } == true
         val running: Boolean get() = phase == Phase.RUNNING
         val currentRecipe: RecipeDef? get() = current?.let { c -> recipes.firstOrNull { it.title == c.title } }

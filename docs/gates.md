@@ -1,6 +1,6 @@
 # On-phone gates (spec section 19)
 
-Everything below is reserved for the user. The JVM suite (982 tests, `tools/gradle.sh testDebugUnitTest`) covers the
+Everything below is reserved for the user. The JVM suite (1,065 tests, `tools/gradle.sh testDebugUnitTest`) covers the
 logic; these gates need real iQOO 15 phones, a relay host, or an OpenRouter account. Build a gate APK with
 `tools/gradle.sh :app:assembleDebug -PhiveFeatures=<flags>`; a flag defaults on only after its gate passed.
 
@@ -113,6 +113,50 @@ What this run taught (each fixed in the code):
 - **No reason on the tile.** The Jobs grid shows "failed on ?" without the cause, and the worker's task path logged
   nothing; the worker now logs each task's start, end and outcome.
 
+## Deck plan phone pass (2026-10-11, same three phones, all flags, `-PhiveDemoThermal`)
+
+What ran: "Generate a pitch deck showing the increase in sales FY2024-26" on phone 1 (Accounts, orchestrator, screen
+on) with phone 2 seeded as Sales and phone 3 as HR, both asleep on power. The plan (T1 `deck_growth`, confidence 1.0,
+under a second) ran AGG on the Sales phone, LLM_MAP on the orchestrator (4.5 s, Qwen3-4B on the NPU, the slide text
+valid first time with the JSON shape spelled out in the template), GEN_IMAGE on phone 3 (SD 1.5: 24-27 s cold, 4.8 s
+warm, then the CLIP post-check whose 600 MB model loads in 30-40 s cold) and RENDER on the orchestrator; the 512 px
+picture travelled back as a blob (473 KB) and the 497 KB .pptx with the picture embedded was written in 1 min 7 s end
+to end. Present pages through the slides; Open .pptx raises the system chooser (DocMaster, Office Reader, Slides).
+
+What the phones taught (each fixed in the code):
+
+- **Roles are not seeded by install.** A fresh phone has no tables; pick its role on the Data screen (or Settings >
+  Demo) before any plan, else the router answers "no catalog holds a term of the question".
+- **Owner ops were missing from the compiler's registry.** `registeredOps` listed only the extra executors, so the
+  compiler refused every pattern with "op AGG of 'a' is not in the registry" (the graph gate had never run a plan);
+  AGG and DOC are now always in it.
+- **LLM_MAP's envelope failed its own schema.** The Commander validated `{"items":[…]}` against the per-item schema
+  ("$: missing title") three times and refused the plan; it now checks each `items[].output`.
+- **HEAVY deadlines were 4-6 s.** The scheduler's heavy p50 was 3 s; diffusion plus the post-check is 60 s cold on a
+  phone, so the default is 45 s (90 s deadline).
+- **A retry on the same phone was ignored.** The worker's duplicate-TASK guard keyed on task id alone; a schema retry
+  now runs because the key includes the TASK nonce.
+- **The CLIP post-check needs its vocabulary.** `clip_fp16` ships without `bpe_simple_vocab_16e6.txt.gz`; copy it
+  from `sd15/` into `Download/HiveCoreModels/clip_fp16/` on each phone (done on the three). A post-check that cannot
+  run no longer fails the task; it is recorded as "none".
+- **"An ordinary safe photo" lost to an illustration.** The zero-shot safety vote now has three safe readings (photo,
+  illustration/chart/diagram, abstract art) against the two unsafe ones.
+- **Memory on the USB-only phone.** Phone 3 was killed for low memory twice while holding the 4 GB LLM and loading SD;
+  it rejoined each time and still produced the picture, but keep the picture phone on a charger with the LLM unloaded.
+
+## Pictures and the guide phone pass (2026-10-11, phone 1 with the all-flags build, phones 2 and 3 asleep)
+
+The three questions the earlier log refused ("what can you create an image off", "generate images of what the charts
+would look like for the data", "create an image of my team") after the guide and the `make_image` pattern landed:
+
+- The first two were answered at once by the guide (no plan, no model; 40 ms and 20 ms in the log): what the image model
+  draws and cannot draw, and that charts come from the deck.
+- "create an image of my team": T1 `make_image`, confidence 1.00, subject "my team". GEN_IMAGE ran on phone 1 itself
+  (SD 1.5 loaded in 1.5 s, 512 px in 5.6 s, 20 steps); the CLIP post-check was skipped (QNN `qnn_graph_execute` error
+  6001 on this phone, logged as a warning, not a failure). Answer in 20 s with the picture card (Open, Share),
+  `files/decks/picture-6ca27d677b7b.png`. SD 1.5 read "my team" as a flat-lay of objects, not people: a fuller subject
+  ("my team of five colleagues at a desk") draws what is meant.
+
 ## Demo runbook
 
 Build: `tools/gradle.sh :app:assembleDebug -PhiveFeatures=all -PhiveDemoThermal`, then `adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk`.
@@ -121,14 +165,24 @@ Build: `tools/gradle.sh :app:assembleDebug -PhiveFeatures=all -PhiveDemoThermal`
 1. Settings > Demo > Permissions: grant everything listed (the card turns green). All files access is only needed
    for the model bundles in `Download/HiveCoreModels`.
 2. Settings > Demo > This phone is: pick its role (phone A Sales, B HR, C Accounts); the result line confirms the seed.
+   Each phone then holds only its share of Kavira Pharmaceuticals' data (Data tab: Sales 6 tables, HR 4, Accounts 3).
+   Start the Kavira jobs on phone A (Sales holds every table they read); another phone answers "the … table is not
+   on this phone".
 3. Turn on Keep the screen on (and Large text for a projector). Hide hashes if nobody will ask about them.
-4. Phone A: Swarm > Pair a phone; phone B: Scan QR; both show the same six digits; They match on both. Phone C joins
-   from a shared invite link (Share on phone A, open the link on C).
+4. Phone A: Swarm > Ping nearby; B and C show "A wants to pair" (on the Swarm screen and as a notification): Approve on
+   both; each then shows the same six digits as A; They match on both sides. Fallbacks: Show QR on A and Scan QR on B,
+   or a shared invite link (Share on phone A, open the link on C). Unrun gate: the ping over the office access point
+   (it rides UDP broadcast plus a unicast sweep of the subnet, like the LAN beacon).
 5. On B and C, turn on Share this phone when idle, then lock them (workers take chunks only with the screen off for
    60 s or on the charger in the background).
 6. Settings > Demo > Reset and restart on A clears earlier runs (pairing is kept unless ticked).
 
 **On stage (phone A)**
+0. Home: tap "Pitch deck from the sales figures" → the plan card lists AGG on Sales, the slide text on one phone, the
+   picture on another, the deck here → LOCAL → the answer shows the slides; Present pages through them, Open .pptx hands
+   the file to PowerPoint / Slides, Share sends it. For the picture step B or C must be on the charger with the SD 1.5
+   bundle; without it the plan runs without the picture (the step is dropped, not failed). The slide text needs the LLM
+   phone; the deck is badged unverified because that text runs once.
 1. Home: tap "Revenue per rep by region" → the plan card shows LOCAL and CLOUD side by side → LOCAL → the answer with
    provenance from Sales and HR. The activity icon tells the story step by step.
 2. Tap "Top region, with HR's approval" → phone B shows the approval screen → one fingerprint → the answer on A.

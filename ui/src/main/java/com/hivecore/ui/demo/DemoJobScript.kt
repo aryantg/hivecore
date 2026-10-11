@@ -31,14 +31,26 @@ object DemoJobScript {
     const val DEFAULT_ITEMS = 120
     const val NON_PHOTO_ITEMS = 40
     private const val BYTES_PER_REMOTE_CHUNK = 180_000L
+    /** seconds of LLM work per table-recipe item on the reference phone (a letter or review of ~150 tokens) */
+    const val LLM_SEC_PER_ITEM = 3.0
+
+    private fun kaviraWords(recipeId: String?): Pair<String, String>? = when (recipeId) {
+        "stockist_letters" -> "letter" to "letters"; "brand_reviews" -> "review" to "reviews"
+        "branch_review_packs", "launch_messages" -> "branch" to "branches"; "launch_kit" -> "seed" to "seeds"; else -> null
+    }
 
     fun frames(request: JobRequest, jobId: String, seed: Long = 7): List<Frame> {
         val photos = request.recipeId == "photo_text" || request.recipeId == null && request.inputs.isNotEmpty()
-        val n = when { request.inputs.isNotEmpty() -> request.inputs.size; photos -> DEFAULT_ITEMS; else -> NON_PHOTO_ITEMS }
-        val chunks = (n + ITEMS_PER_CHUNK - 1) / ITEMS_PER_CHUNK
+        val kavira = KaviraDemoJobs.items(request.recipeId)
+        val n = when { request.inputs.isNotEmpty() -> request.inputs.size; photos -> DEFAULT_ITEMS; kavira != null -> kavira; else -> NON_PHOTO_ITEMS }
+        // a table recipe's items are slow LLM work: fewer per chunk, so even 3 branches spread over 3 phones
+        val perChunk = if (kavira != null) maxOf(1, minOf(ITEMS_PER_CHUNK, (n + 5) / 6)) else ITEMS_PER_CHUNK
+        val secPerItem = if (kavira != null) LLM_SEC_PER_ITEM else 1.0
+        val chunks = (n + perChunk - 1) / perChunk
         val phones = if (request.private) PHONES.take(1) else PHONES
-        val itemsOf = IntArray(chunks) { minOf(ITEMS_PER_CHUNK, n - it * ITEMS_PER_CHUNK) }
-        val label = { i: Int -> "${if (photos) "photos" else "items"} ${i * ITEMS_PER_CHUNK + 1}–${i * ITEMS_PER_CHUNK + itemsOf[i]}" }
+        val itemsOf = IntArray(chunks) { minOf(perChunk, n - it * perChunk) }
+        val (one, many) = if (photos) "photo" to "photos" else kaviraWords(request.recipeId) ?: ("item" to "items")
+        val label = { i: Int -> if (itemsOf[i] == 1) "$one ${i * perChunk + 1}" else "$many ${i * perChunk + 1}–${i * perChunk + itemsOf[i]}" }
 
         val state = Array(chunks) { ChunkState.QUEUED }
         val node = arrayOfNulls<String>(chunks)
@@ -54,7 +66,7 @@ object DemoJobScript {
         var remoteChunks = 0L
         var rnd = seed * 2862933555777941757L + 3037000493L
         fun jitter(): Double { rnd = rnd * 6364136223846793005L + 1442695040888963407L; return 0.85 + ((rnd ushr 11) % 1000) / 1000.0 * 0.3 }
-        val singleMs = (n / phones.first().itemsPerSec * 1000).toLong() + chunks * OVERHEAD_MS
+        val singleMs = (n * secPerItem / phones.first().itemsPerSec * 1000).toLong() + chunks * OVERHEAD_MS
 
         val frames = ArrayList<Frame>()
         fun snapshot(t: Long, finished: Boolean = false): JobProgress {
@@ -70,9 +82,9 @@ object DemoJobScript {
                 singlePhoneMs = singleMs,
                 speedup = if (finished) Math.round(singleMs.toDouble() / t * 100.0) / 100.0 else null,
                 done = finished,
-                resultSummary = if (finished) summary(n, photos, phones.size) else null,
+                resultSummary = if (finished) KaviraDemoJobs.summary(request.recipeId, phones.size) ?: summary(n, photos, phones.size) else null,
                 resultRef = if (finished) "split:${resultHash(n, seed)}" else null,
-                result = if (finished && photos) ocrResult(request, n, seed) else null,
+                result = if (finished && photos) ocrResult(request, n, seed) else if (finished) KaviraDemoJobs.result(request.recipeId) else null,
             )
         }
 
@@ -85,7 +97,7 @@ object DemoJobScript {
                 if (busyChunk[p] != null || left[p] || queue.isEmpty()) continue
                 val c = queue.removeFirst()
                 busyChunk[p] = c; startAt[p] = t
-                finishAt[p] = t + (itemsOf[c] / phones[p].itemsPerSec * 1000 * jitter()).toLong() + OVERHEAD_MS
+                finishAt[p] = t + (itemsOf[c] * secPerItem / phones[p].itemsPerSec * 1000 * jitter()).toLong() + OVERHEAD_MS
                 node[c] = phones[p].name
                 if (state[c] != ChunkState.DUPLICATED) state[c] = ChunkState.RUNNING
                 assigned = true

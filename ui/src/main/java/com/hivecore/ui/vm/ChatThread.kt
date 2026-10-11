@@ -52,15 +52,20 @@ data class Suggestion(val title: String, val hint: String, val request: String, 
 }
 
 /**
- * The demo prompts. The ASK ones match the planner's patterns (patterns.json: per_unit, growth_over_period,
- * ratio_then_rank + flag_vs_average); the last needs photos, so it opens Jobs with the OCR recipe selected rather than
- * planning through Ask (whose recipe path sends no files).
+ * The demo prompts. The ASK ones match the planner's patterns (patterns.json: deck_growth, per_unit,
+ * growth_over_period, ratio_then_rank + flag_vs_average) over Kavira Pharmaceuticals' seeded tables; the JOBS ones open
+ * Jobs on a recipe: the stockist letters (a table recipe over the Sales phone's stockists) and the photo OCR (which
+ * needs files, so it cannot plan through Ask, whose recipe path sends none).
  */
 object AskSuggestions {
+    const val DECK_REQUEST = "Generate a pitch deck showing the increase in sales FY2024-26"
+
     val DEFAULT: List<Suggestion> = listOf(
-        Suggestion("Revenue per rep by region", "Sales and HR phones each answer their half", "Revenue per rep by region this year"),
-        Suggestion("Month-on-month revenue", "Q3 growth by region, from the Sales phone", "How did revenue change month on month in Q3 by region?"),
-        Suggestion("Top region, with HR's approval", "One fingerprint on HR's phone", "Which region has the highest revenue per rep, and is its average commission above the company average?"),
+        Suggestion("Pitch deck from the sales figures", "Numbers on Sales, words and a picture on the other phones, slides here", DECK_REQUEST),
+        Suggestion("Sales per rep by branch", "Sales and HR phones each answer their half", "Sales per rep by branch in FY2026"),
+        Suggestion("Month-on-month sales", "FY2026 by branch, from the Sales phone", "How did sales change month on month in FY2026 by branch?"),
+        Suggestion("Top branch, with HR's approval", "One fingerprint on HR's phone", "Which branch has the highest sales per rep, and is its average incentive above the company average?"),
+        Suggestion("Letters to 48 stockists", "One letter per stockist, written across the phones", "Write a letter to each of our 48 stockists", Suggestion.Kind.JOBS, "stockist_letters"),
         Suggestion("Read 120 invoice photos", "OCR split across every phone", "Read 120 invoice photos into a table", Suggestion.Kind.JOBS, "photo_text"),
     )
 }

@@ -1,0 +1,69 @@
+{
+  "id": "launch_kit",
+  "version": "1",
+  "title": "Launch kit",
+  "produces": "A launch poster drawn by the image model (four candidates, one seed per chunk across the phones), then the words of a two-page doctor detail aid written by the language model, from one brief: two different models in one job",
+  "axis": "fanout",
+  "merge": "rank",
+  "input": "prompt",
+  "itemKinds": [
+    "prompt"
+  ],
+  "sink": "folder",
+  "replicate": "none",
+  "stages": [
+    {
+      "id": "poster",
+      "op": "GEN_IMAGE",
+      "params": {
+        "prompt": "clean modern pharmaceutical launch poster illustration for {item}, teal and navy tones, bright, photorealistic product on a plain background, no text, no logos, no faces",
+        "negative": "text, letters, numbers, watermark, logo, blurry, distorted hands, deformed faces",
+        "n": 4,
+        "seed": 11,
+        "steps": 20,
+        "guidance": 7.5,
+        "size": 512
+      }
+    },
+    {
+      "id": "words",
+      "op": "LLM_MAP",
+      "params": {
+        "template": "You write promotional copy for Kavira Pharmaceuticals. From the brief below write the poster headline and subline and the bullet points of a two-page doctor detail aid, plus a call to action for medical representatives. Make no clinical claims that are not in the brief and invent no figures.\n\nBrief: {item}",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "poster_headline": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "poster_subline": {
+              "type": "string",
+              "maxLength": 120
+            },
+            "detail_aid": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "minItems": 4,
+              "maxItems": 8
+            },
+            "call_to_action": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "poster_headline",
+            "detail_aid",
+            "call_to_action"
+          ]
+        },
+        "maxTokens": 600,
+        "unitMs": 11000
+      }
+    }
+  ]
+}

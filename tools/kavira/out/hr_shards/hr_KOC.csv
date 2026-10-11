@@ -1,0 +1,33 @@
+employee_id,name,department,designation,branch,work_location,territory,area_code,date_of_joining,tenure_years,grade,reporting_manager_id,fiscal_year,ctc_annual_inr,fixed_annual_inr,variable_target_inr,incentive_paid_fy2026_inr,monthly_travel_allowance_inr
+KVR-0095,Vishnu Menon,Sales,Area Sales Manager,KOC,Field,,KOC-A1,2023-07-10,2.7,M1,KVR-0127,FY2026,701000,610000,91000,91000,12400
+KVR-0096,Rahul Mathew,Sales,Area Sales Manager,KOC,Field,,KOC-A2,2024-10-01,1.5,M1,KVR-0127,FY2026,795000,691000,104000,98100,11500
+KVR-0097,Akhil Thomas,Sales,Medical Representative,KOC,Field,Thiruvananthapuram,KOC-A2,2023-07-12,2.7,F1,KVR-0096,FY2026,368000,320000,48000,45300,10800
+KVR-0098,Jithin Menon,Sales,Medical Representative,KOC,Field,Thrissur,KOC-A1,2023-10-05,2.5,F1,KVR-0095,FY2026,355000,309000,46000,67000,9500
+KVR-0099,Athira Menon,Sales,Medical Representative,KOC,Field,Thiruvananthapuram,KOC-A2,2024-02-11,2.1,F1,KVR-0096,FY2026,378000,329000,49000,44200,8900
+KVR-0100,Vishnu Mathew,Sales,Medical Representative,KOC,Field,Ernakulam,KOC-A1,2024-02-15,2.1,F1,KVR-0095,FY2026,379000,330000,49000,48900,6800
+KVR-0101,Reshma Joseph,Sales,Medical Representative,KOC,Field,Ernakulam,KOC-A1,2024-02-23,2.1,F1,KVR-0095,FY2026,400000,348000,52000,59100,6800
+KVR-0102,Abhilash Menon,Sales,Medical Representative,KOC,Field,Kottayam,KOC-A1,2024-01-30,2.2,F1,KVR-0095,FY2026,348000,303000,45000,42700,10200
+KVR-0103,Arjun Thomas,Sales,Medical Representative,KOC,Field,Thiruvananthapuram,KOC-A2,2024-01-29,2.2,F1,KVR-0096,FY2026,355000,309000,46000,46900,9300
+KVR-0104,Anoop Menon,Sales,Medical Representative,KOC,Field,Kozhikode,KOC-A2,2023-12-25,2.3,F1,KVR-0096,FY2026,343000,298000,45000,44200,8700
+KVR-0105,Sajith Thomas,Sales,Medical Representative,KOC,Field,Thiruvananthapuram,KOC-A2,2023-07-15,2.7,F1,KVR-0096,FY2026,376000,327000,49000,49200,9400
+KVR-0106,Neethu Krishnan,Sales,Medical Representative,KOC,Field,Ernakulam,KOC-A1,2024-03-13,2.0,F1,KVR-0095,FY2026,380000,330000,50000,55900,7900
+KVR-0107,Athira Joseph,Sales,Medical Representative,KOC,Field,Thiruvananthapuram,KOC-A2,2023-10-24,2.4,F1,KVR-0096,FY2026,365000,317000,48000,56800,9800
+KVR-0108,Sreeja Krishnan,Sales,Medical Representative,KOC,Field,Kozhikode,KOC-A2,2023-12-14,2.3,F1,KVR-0096,FY2026,338000,294000,44000,44100,9900
+KVR-0109,Manu George,Sales,Medical Representative,KOC,Field,Kozhikode,KOC-A2,2024-12-25,1.3,F1,KVR-0096,FY2026,343000,298000,45000,39600,9400
+KVR-0110,Abhilash Pillai,Sales,Medical Representative,KOC,Field,Kozhikode,KOC-A2,2025-03-31,1.0,F1,KVR-0096,FY2026,290000,252000,38000,31200,10300
+KVR-0111,Neethu Varghese,Sales,Medical Representative,KOC,Field,Kannur,KOC-A2,2024-11-21,1.4,F1,KVR-0096,FY2026,347000,302000,45000,40400,10200
+KVR-0112,Akhil George,Sales,Medical Representative,KOC,Field,Ernakulam,KOC-A1,2024-07-07,1.7,F1,KVR-0095,FY2026,384000,334000,50000,56000,6300
+KVR-0113,Anjali Das,Sales,Medical Representative,KOC,Field,Ernakulam,KOC-A1,2025-03-29,1.0,F1,KVR-0095,FY2026,360000,313000,47000,47100,8100
+KVR-0114,Anoop Pillai,Sales,Medical Representative,KOC,Field,Kottayam,KOC-A1,2025-01-31,1.2,F1,KVR-0095,FY2026,334000,290000,44000,32500,10100
+KVR-0115,Neethu Mathew,Sales,Medical Representative,KOC,Field,Thrissur,KOC-A1,2024-06-01,1.8,F1,KVR-0095,FY2026,357000,310000,47000,66200,8500
+KVR-0116,Remya George,Sales,Medical Representative,KOC,Field,Thrissur,KOC-A1,2025-12-24,0.3,F1,KVR-0095,FY2026,319000,277000,42000,23200,11100
+KVR-0117,Vishnu Kurian,Sales,Medical Representative,KOC,Field,Thrissur,KOC-A1,2025-07-07,0.7,F1,KVR-0095,FY2026,336000,292000,44000,46400,8100
+KVR-0118,Abhilash Mathew,Sales,Medical Representative,KOC,Field,Ernakulam,KOC-A1,2025-10-17,0.5,F1,KVR-0095,FY2026,377000,328000,49000,25500,7300
+KVR-0119,Manu Nair,Sales,Medical Representative,KOC,Field,Ernakulam,KOC-A1,2025-12-18,0.3,F1,KVR-0095,FY2026,331000,288000,43000,15100,7500
+KVR-0120,Nikhil Das,Sales,Medical Representative,KOC,Field,Kannur,KOC-A2,2025-10-01,0.5,F1,KVR-0096,FY2026,307000,267000,40000,17400,10400
+KVR-0127,Manu Thomas,Sales,Branch Sales Manager,KOC,Branch office,,,2023-06-15,2.8,M3,KVR-0124,FY2026,1446000,1257000,189000,187900,0
+KVR-0144,Aswathy Mathew,Finance,Branch Accountant,KOC,Branch office,,,2023-06-20,2.8,E1,KVR-0138,FY2026,399000,369000,30000,29700,0
+KVR-0157,Gopika Nair,Branch Operations,Branch Operations Executive,KOC,Branch office,,,2023-07-01,2.7,E1,KVR-0127,FY2026,328000,312000,16000,15900,0
+KVR-0158,Gopika Das,Branch Operations,Branch Operations Executive,KOC,Branch office,,,2023-07-01,2.7,E1,KVR-0127,FY2026,321000,306000,15000,13000,0
+KVR-0159,Aswathy Das,Branch Operations,Branch Operations Executive,KOC,Branch office,,,2024-06-01,1.8,E1,KVR-0127,FY2026,317000,302000,15000,16600,0
+KVR-0160,Sreeja George,Branch Operations,Branch Operations Executive,KOC,Branch office,,,2025-08-01,0.7,E1,KVR-0127,FY2026,279000,266000,13000,8000,0

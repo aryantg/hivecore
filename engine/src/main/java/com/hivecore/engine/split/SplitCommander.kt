@@ -388,8 +388,8 @@ class SplitCommander(
                         journal.attempt(attemptRow(c, n, ev.node, "mismatch", b.outputHash))
                         q.onHashMismatch(ev.node, i, n)
                     }
-                    schemaObj != null && schema.validate(out, schemaObj) != null -> {
-                        val why = schema.validate(out, schemaObj) ?: "schema"
+                    schemaObj != null && schema.check(job.op, out, schemaObj) != null -> {
+                        val why = schema.check(job.op, out, schemaObj) ?: "schema"
                         journal.attempt(attemptRow(c, n, ev.node, "error", b.outputHash, SplitConstants.ERR_SCHEMA))
                         q.onSchemaFault(ev.node, i, n, why)
                     }

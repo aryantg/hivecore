@@ -112,6 +112,15 @@ class DemoScriptTest {
         assertEquals("only the commission question asks HR", 1, asked)
     }
 
+    @Test fun aQuestionAboutTheAppIsAnsweredAtOnce() = runTest {
+        val port = DemoAskPort(timeScale = { 1.0 })
+        val a = port.plan("what can you create an image off") as PlanOptions.Answered
+        assertTrue(a.answer.text, a.answer.text.contains("Stable Diffusion"))
+        val d = port.plan("What data do you have?") as PlanOptions.Answered
+        assertTrue(d.answer.text, d.answer.text.contains("Sales: tables sales monthly"))
+        assertFalse("a request is planned, not explained", port.plan("Create an image of my team") is PlanOptions.Answered)
+    }
+
     @Test fun aDeclineRefusesInPlainWords() = runTest {
         val port = DemoAskPort(timeScale = { 1.0 }).apply { onNeedsApproval = { false } }
         val q = AskSuggestions.DEFAULT.single { it.title.contains("approval") }.request
@@ -120,5 +129,64 @@ class DemoScriptTest {
         val last = port.run(plan.plan, RunMode.LOCAL).toList().last()
         assertTrue(last is AskEvent.Refused)
         settle()
+    }
+}
+
+/** The scripted deck: a real plan shape, the figures and words of [DemoDeck], the .pptx through the app's hook. */
+@OptIn(ExperimentalCoroutinesApi::class)
+class DemoDeckScriptTest {
+    @Test fun theDeckPromptPlansAndAnswersWithADeck() = runTest {
+        var materialised = 0
+        val port = DemoAskPort({ 10.0 }).apply { materialiseDeck = { d -> materialised++; d.copy(file = "/data/decks/deck-abc.pptx", fileSha256 = "abc", bytes = 1234) } }
+        val options = port.plan(AskSuggestions.DECK_REQUEST) as PlanOptions.Ready
+        assertEquals(listOf("AGG", "LLM_MAP", "GEN_IMAGE", "RENDER"), options.plan.steps.map { it.op })
+        assertEquals(listOf("Sales", "Accounts", "HR", "here"), options.plan.steps.map { it.phone })
+        val events = port.run(options.plan, RunMode.LOCAL).toList()
+        val answered = events.filterIsInstance<AskEvent.Answered>().single().answer
+        val deck = answered.deck!!
+        assertEquals(1, materialised)
+        assertEquals("Kavira Pharmaceuticals: sales FY2024-26", deck.title)
+        assertEquals(5, deck.slides.size)
+        assertEquals("/data/decks/deck-abc.pptx", deck.file)
+        assertEquals(listOf("FY2024", "FY2025", "FY2026"), deck.slides[1].chart!!.categories)
+        assertEquals(listOf("₹43.1 Cr", "₹49.6 Cr", "₹59.5 Cr"), deck.slides[1].chart!!.labels)
+        assertEquals(listOf(null, "+15 %", "+20 %"), deck.slides[1].chart!!.deltas)
+        assertEquals("Net sales grew 38 % from FY2024 (₹43.1 Cr) to FY2026 (₹59.5 Cr).", deck.summary)
+        assertTrue(answered.text, answered.text.startsWith(deck.summary) && answered.text.endsWith("saved as .pptx."))
+        assertEquals(5, events.filterIsInstance<AskEvent.Status>().size)
+        // without the hook the deck is structure only
+        val plain = DemoAskPort({ 10.0 }).run(options.plan, RunMode.LOCAL).toList().filterIsInstance<AskEvent.Answered>().single().answer.deck!!
+        assertEquals(null, plain.file)
+        assertEquals("The illustration did not reach this phone", plain.slides[3].caption)
+    }
+}
+
+/** Demo mode's Kavira table recipes: one item per stockist, brand or branch, results worded from the seeded figures. */
+class KaviraDemoJobsTest {
+    @Test fun stockistLettersSplitAndReadAsATable() {
+        val frames = DemoJobScript.frames(JobRequest("Stockist letters", recipeId = "stockist_letters"), "j")
+        val end = frames.last().progress
+        assertTrue(end.done)
+        assertEquals(48, end.chunks.sumOf { c -> c.label.substringAfter(' ').split('–').let { if (it.size == 2) it[1].toInt() - it[0].toInt() + 1 else 1 } })
+        assertEquals(setOf("This phone", "Sales", "Accounts"), end.nodes.map { it.name }.toSet())
+        assertTrue(end.resultSummary!!, end.resultSummary!!.startsWith("48 stockists → 48 letters across 3 phones"))
+        val v = ResultViews.of(end, null) as ResultView.Table
+        assertEquals(listOf("item", "output"), v.columns)
+        assertEquals(48, v.rows.size)
+        assertEquals("KA-01 · Bengaluru East · BLR", v.rows[0][0])
+        assertTrue(v.rows[0][1], v.rows[0][1].contains("₹49 L") && v.rows[0][1].contains("52 days"))
+    }
+
+    @Test fun everyKaviraRecipeHasAScriptedRun() {
+        for ((id, n) in mapOf("brand_reviews" to 19, "branch_review_packs" to 3, "launch_messages" to 3)) {
+            val end = DemoJobScript.frames(JobRequest(id, recipeId = id), "j").last().progress
+            assertTrue(id, end.done)
+            val v = ResultViews.of(end, null) as ResultView.Table
+            assertEquals(id, n, v.rows.size)
+        }
+        val packs = DemoJobScript.frames(JobRequest("packs", recipeId = "branch_review_packs"), "j").last().progress
+        assertTrue("3 branches still spread over the phones", packs.nodes.size >= 2)
+        val kit = DemoJobScript.frames(JobRequest("kit", recipeId = "launch_kit", params = kotlinx.serialization.json.buildJsonObject { put("prompt", kotlinx.serialization.json.JsonPrimitive("Vildora M")) }), "j").last().progress
+        assertTrue(kit.resultSummary!!, kit.resultSummary!!.contains("4 poster candidates"))
     }
 }

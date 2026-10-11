@@ -1,37 +1,1821 @@
 {
-  "version": 1,
+  "version": 2,
   "today": "2026-10-10",
+  "company": {
+    "name": "Kavira Pharmaceuticals Pvt Ltd",
+    "fictional": true,
+    "hq": "Bengaluru",
+    "founded": 2006,
+    "employees": 280,
+    "phones": 204,
+    "fiscal_year_note": "Indian fiscal year; FY2024 = Apr 2023 to Mar 2024",
+    "generator": "tools/kavira/make_kavira_data.py + export_seed.py"
+  },
   "notes": [
-    "Role names match core NodeRole: HR, SALES, ACCOUNTS.",
-    "HR seeds employees + onboarding_checklist.docx only; leave_policy.pdf arrives live by share sheet in the tour (kept in assets for tests and the Wave 2 hook).",
-    "invoices.csv has no month column: month = substr(date,1,7) is derived at import (plan section 7) and registered groupable; it is listed here with derived so the flags are known.",
+    "Role names match core NodeRole: HR, SALES, ACCOUNTS; each role is one phone of the demo.",
+    "Kavira Pharmaceuticals (fictional): money columns are INR (the generator's lakh figures x 100,000); fiscal years run April to March and are named by the year they end in.",
+    "sales_monthly.net_sales answers to 'sales' and 'revenue' so the deck prompt binds its measure; no other table carries those aliases.",
+    "compensation and salary_history carry the confidential pay columns: only AVG/COUNT leave the HR phone, with the 5-person floor; staff is the pay-free directory.",
+    "The legacy tour tables (employees, sales, invoices) stay listed for the planner tests; no role loads them.",
     "Seed rows carry _sources.seed = 1 and _docs.seed = 1."
   ],
   "roles": {
     "HR": {
       "tables": [
-        "employees"
+        "staff",
+        "compensation",
+        "salary_history",
+        "devices"
       ],
       "docs": [
-        "onboarding_checklist.docx"
+        "onboarding_checklist.docx",
+        "kavira_hr_access_policy.md"
       ]
     },
     "SALES": {
       "tables": [
-        "sales"
+        "sales_monthly",
+        "products",
+        "branch_master",
+        "sales_force",
+        "events",
+        "stockists"
       ],
       "docs": [
-        "q3_review.pptx"
+        "kavira_company_snapshot.md"
       ]
     },
     "ACCOUNTS": {
       "tables": [
-        "invoices"
+        "financials",
+        "receivables",
+        "budget_vs_actual"
       ],
       "docs": []
     }
   },
   "tables": {
+    "sales_monthly": {
+      "file": "kavira/sales_monthly.csv",
+      "rows": 5802,
+      "confidential": false,
+      "aliases": [
+        "sales",
+        "revenue",
+        "sold",
+        "orders",
+        "turnover",
+        "monthly sales",
+        "sales monthly"
+      ],
+      "columns": [
+        {
+          "name": "month",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "months",
+            "period"
+          ]
+        },
+        {
+          "name": "fiscal_year",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "fy",
+            "year",
+            "years",
+            "financial year"
+          ]
+        },
+        {
+          "name": "fiscal_quarter",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "quarter",
+            "quarters"
+          ]
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "branches",
+            "region",
+            "regions",
+            "office",
+            "offices",
+            "city",
+            "cities",
+            "state"
+          ]
+        },
+        {
+          "name": "branch_city",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "branch city"
+          ]
+        },
+        {
+          "name": "brand",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "brands",
+            "product",
+            "products",
+            "sku",
+            "skus"
+          ]
+        },
+        {
+          "name": "molecule",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "molecules",
+            "generic",
+            "generics"
+          ]
+        },
+        {
+          "name": "therapy_area",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "therapy",
+            "therapy area",
+            "therapy areas",
+            "category",
+            "categories",
+            "portfolio"
+          ]
+        },
+        {
+          "name": "segment",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "segments",
+            "business",
+            "businesses",
+            "line of business"
+          ]
+        },
+        {
+          "name": "channel",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "channels",
+            "route to market"
+          ]
+        },
+        {
+          "name": "units",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "unit",
+            "packs",
+            "pack",
+            "volume",
+            "volumes",
+            "quantity",
+            "qty",
+            "pieces"
+          ]
+        },
+        {
+          "name": "gross_sales",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "gross sales",
+            "gross revenue",
+            "gross"
+          ]
+        },
+        {
+          "name": "net_sales",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "sales",
+            "revenue",
+            "revenues",
+            "net sales",
+            "turnover",
+            "income",
+            "sales value",
+            "earnings"
+          ]
+        }
+      ]
+    },
+    "products": {
+      "file": "kavira/products.csv",
+      "rows": 19,
+      "confidential": false,
+      "aliases": [
+        "products",
+        "product",
+        "brands",
+        "brand",
+        "portfolio",
+        "catalogue",
+        "range",
+        "price list"
+      ],
+      "columns": [
+        {
+          "name": "product_id",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": true,
+          "groupable": false,
+          "aliases": [
+            "product id",
+            "id"
+          ]
+        },
+        {
+          "name": "brand",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "brands",
+            "product",
+            "name"
+          ]
+        },
+        {
+          "name": "molecule",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "molecules",
+            "generic"
+          ]
+        },
+        {
+          "name": "therapy_area",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "therapy",
+            "therapy area",
+            "category"
+          ]
+        },
+        {
+          "name": "segment",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "segments"
+          ]
+        },
+        {
+          "name": "pack",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "pack size",
+            "packs"
+          ]
+        },
+        {
+          "name": "launch",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "launched",
+            "launch month",
+            "launch date"
+          ]
+        },
+        {
+          "name": "trade_price",
+          "type": "REAL",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "price",
+            "prices",
+            "trade price",
+            "price per pack"
+          ]
+        },
+        {
+          "name": "also_on_govt_tender",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "tender",
+            "on tender",
+            "government tender"
+          ]
+        }
+      ]
+    },
+    "branch_master": {
+      "file": "kavira/branch_master.csv",
+      "rows": 3,
+      "confidential": false,
+      "aliases": [
+        "branch master",
+        "branch list",
+        "offices",
+        "locations"
+      ],
+      "columns": [
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "branches",
+            "code"
+          ]
+        },
+        {
+          "name": "city",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "cities"
+          ]
+        },
+        {
+          "name": "state_covered",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "state",
+            "states"
+          ]
+        },
+        {
+          "name": "opened",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "opened in",
+            "opening"
+          ]
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "roles"
+          ]
+        }
+      ]
+    },
+    "sales_force": {
+      "file": "kavira/sales_force.csv",
+      "rows": 11,
+      "confidential": false,
+      "aliases": [
+        "sales force",
+        "field force",
+        "coverage",
+        "productivity"
+      ],
+      "columns": [
+        {
+          "name": "fiscal_year",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "fy",
+            "year",
+            "years"
+          ]
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "branches",
+            "region",
+            "regions"
+          ]
+        },
+        {
+          "name": "branch_city",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "city"
+          ]
+        },
+        {
+          "name": "medical_reps",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "rep count",
+            "reps at year end",
+            "field force",
+            "mr count"
+          ]
+        },
+        {
+          "name": "doctors_covered",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "doctors",
+            "doctor coverage"
+          ]
+        },
+        {
+          "name": "chemists_covered",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "chemists",
+            "chemist coverage",
+            "pharmacies covered"
+          ]
+        },
+        {
+          "name": "branded_sales",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "branded sales",
+            "branded revenue"
+          ]
+        },
+        {
+          "name": "branded_sales_per_rep",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "productivity",
+            "rep productivity",
+            "branded sales per rep"
+          ]
+        }
+      ]
+    },
+    "events": {
+      "file": "kavira/events.csv",
+      "rows": 13,
+      "confidential": false,
+      "aliases": [
+        "events",
+        "event",
+        "business events",
+        "timeline",
+        "what happened",
+        "milestones"
+      ],
+      "columns": [
+        {
+          "name": "month",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "months",
+            "when"
+          ]
+        },
+        {
+          "name": "type",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "types",
+            "kind",
+            "category"
+          ]
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": true,
+          "groupable": false,
+          "aliases": [
+            "event",
+            "headline"
+          ]
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "details",
+            "what happened"
+          ]
+        },
+        {
+          "name": "impact",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "effect",
+            "positive or negative"
+          ]
+        }
+      ]
+    },
+    "staff": {
+      "file": "kavira/staff.csv",
+      "rows": 280,
+      "confidential": false,
+      "aliases": [
+        "staff",
+        "employees",
+        "employee",
+        "people",
+        "headcount",
+        "head count",
+        "workforce",
+        "team",
+        "reps",
+        "rep",
+        "medical reps",
+        "medical rep",
+        "medical representatives",
+        "mrs",
+        "field staff",
+        "directory"
+      ],
+      "columns": [
+        {
+          "name": "employee_id",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": true,
+          "groupable": false,
+          "aliases": [
+            "employee id",
+            "id",
+            "staff id"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": true,
+          "groupable": false,
+          "aliases": [
+            "names",
+            "employee name",
+            "called",
+            "named"
+          ]
+        },
+        {
+          "name": "department",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "departments",
+            "function",
+            "functions",
+            "team",
+            "teams"
+          ]
+        },
+        {
+          "name": "designation",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "designations",
+            "role",
+            "roles",
+            "title",
+            "titles",
+            "job title",
+            "grade name"
+          ]
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "branches",
+            "region",
+            "regions",
+            "office",
+            "offices",
+            "city",
+            "cities"
+          ]
+        },
+        {
+          "name": "work_location",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "location",
+            "locations",
+            "site",
+            "sites",
+            "where they work"
+          ]
+        },
+        {
+          "name": "territory",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "territories",
+            "area",
+            "areas",
+            "town",
+            "towns"
+          ]
+        },
+        {
+          "name": "area_code",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "area code",
+            "area codes",
+            "asm area"
+          ]
+        },
+        {
+          "name": "date_of_joining",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "joined",
+            "joining date",
+            "join date",
+            "hired",
+            "start date"
+          ]
+        },
+        {
+          "name": "tenure_years",
+          "type": "REAL",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "tenure",
+            "years of service",
+            "experience"
+          ]
+        },
+        {
+          "name": "grade",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "grades",
+            "band",
+            "bands",
+            "level",
+            "levels"
+          ]
+        },
+        {
+          "name": "reporting_manager_id",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": true,
+          "groupable": false,
+          "aliases": [
+            "manager",
+            "manager id",
+            "reports to"
+          ]
+        }
+      ]
+    },
+    "compensation": {
+      "file": "kavira/compensation.csv",
+      "rows": 280,
+      "confidential": true,
+      "aliases": [
+        "compensation",
+        "payroll",
+        "pay data",
+        "salary data",
+        "ctc data",
+        "remuneration"
+      ],
+      "columns": [
+        {
+          "name": "employee_id",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": true,
+          "groupable": false,
+          "aliases": [
+            "employee id",
+            "id",
+            "staff id"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": true,
+          "groupable": false,
+          "aliases": [
+            "names",
+            "employee name",
+            "called",
+            "named"
+          ]
+        },
+        {
+          "name": "department",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "departments",
+            "function",
+            "functions",
+            "team",
+            "teams"
+          ]
+        },
+        {
+          "name": "designation",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "designations",
+            "role",
+            "roles",
+            "title",
+            "titles",
+            "job title",
+            "grade name"
+          ]
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "branches",
+            "region",
+            "regions",
+            "office",
+            "offices",
+            "city",
+            "cities"
+          ]
+        },
+        {
+          "name": "work_location",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "location",
+            "locations",
+            "site",
+            "sites",
+            "where they work"
+          ]
+        },
+        {
+          "name": "territory",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "territories",
+            "area",
+            "areas",
+            "town",
+            "towns"
+          ]
+        },
+        {
+          "name": "area_code",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "area code",
+            "area codes",
+            "asm area"
+          ]
+        },
+        {
+          "name": "date_of_joining",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "joined",
+            "joining date",
+            "join date",
+            "hired",
+            "start date"
+          ]
+        },
+        {
+          "name": "tenure_years",
+          "type": "REAL",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "tenure",
+            "years of service",
+            "experience"
+          ]
+        },
+        {
+          "name": "grade",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "grades",
+            "band",
+            "bands",
+            "level",
+            "levels"
+          ]
+        },
+        {
+          "name": "reporting_manager_id",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": true,
+          "groupable": false,
+          "aliases": [
+            "manager",
+            "manager id",
+            "reports to"
+          ]
+        },
+        {
+          "name": "fiscal_year",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "fy",
+            "year"
+          ]
+        },
+        {
+          "name": "ctc",
+          "type": "INTEGER",
+          "confidential": true,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "salary",
+            "salaries",
+            "pay",
+            "wage",
+            "wages",
+            "annual ctc",
+            "cost to company",
+            "package",
+            "compensation"
+          ]
+        },
+        {
+          "name": "fixed_pay",
+          "type": "INTEGER",
+          "confidential": true,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "fixed",
+            "fixed salary",
+            "basic",
+            "fixed component"
+          ]
+        },
+        {
+          "name": "variable_target",
+          "type": "INTEGER",
+          "confidential": true,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "variable",
+            "variable pay",
+            "target incentive",
+            "bonus target"
+          ]
+        },
+        {
+          "name": "incentive_paid",
+          "type": "INTEGER",
+          "confidential": true,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "incentive",
+            "incentives",
+            "bonus",
+            "bonuses",
+            "commission",
+            "commissions",
+            "payout"
+          ]
+        },
+        {
+          "name": "travel_allowance",
+          "type": "INTEGER",
+          "confidential": true,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "ta",
+            "travel",
+            "allowance",
+            "allowances",
+            "monthly travel allowance"
+          ]
+        }
+      ]
+    },
+    "salary_history": {
+      "file": "kavira/salary_history.csv",
+      "rows": 1015,
+      "confidential": true,
+      "aliases": [
+        "salary history",
+        "pay history",
+        "increments",
+        "increment history",
+        "raises",
+        "hikes"
+      ],
+      "columns": [
+        {
+          "name": "employee_id",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": true,
+          "groupable": false,
+          "aliases": [
+            "employee id",
+            "id"
+          ]
+        },
+        {
+          "name": "fiscal_year",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "fy",
+            "year",
+            "years"
+          ]
+        },
+        {
+          "name": "ctc",
+          "type": "INTEGER",
+          "confidential": true,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "salary",
+            "pay",
+            "annual ctc",
+            "historical salary"
+          ]
+        },
+        {
+          "name": "increment_pct",
+          "type": "REAL",
+          "confidential": true,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "increment",
+            "increments",
+            "raise",
+            "raises",
+            "hike",
+            "hikes",
+            "increment percent"
+          ]
+        }
+      ]
+    },
+    "devices": {
+      "file": "kavira/devices.csv",
+      "rows": 204,
+      "confidential": false,
+      "aliases": [
+        "devices",
+        "device",
+        "phones",
+        "phone",
+        "handsets",
+        "handset",
+        "company phones",
+        "mobiles",
+        "hardware",
+        "fleet"
+      ],
+      "columns": [
+        {
+          "name": "device_id",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": true,
+          "groupable": false,
+          "aliases": [
+            "device id",
+            "phone id",
+            "id"
+          ]
+        },
+        {
+          "name": "assigned_employee_id",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": true,
+          "groupable": false,
+          "aliases": [
+            "employee id",
+            "assigned to",
+            "owner"
+          ]
+        },
+        {
+          "name": "designation",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "designations",
+            "role",
+            "roles"
+          ]
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "branches",
+            "region",
+            "regions",
+            "office",
+            "city"
+          ]
+        },
+        {
+          "name": "usually_at",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "location",
+            "where",
+            "gathering",
+            "site"
+          ]
+        },
+        {
+          "name": "tier",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "tiers",
+            "class",
+            "grade",
+            "segment"
+          ]
+        },
+        {
+          "name": "ram_gb",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "ram",
+            "memory",
+            "gb ram"
+          ]
+        },
+        {
+          "name": "storage_gb",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "storage",
+            "gb storage"
+          ]
+        },
+        {
+          "name": "chipset_class",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "chipset",
+            "soc",
+            "processor class"
+          ]
+        },
+        {
+          "name": "has_npu",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "npu",
+            "ai chip",
+            "neural engine"
+          ]
+        },
+        {
+          "name": "android_version",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "android",
+            "os version"
+          ]
+        },
+        {
+          "name": "purchased_year",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "purchased",
+            "bought",
+            "purchase year",
+            "age"
+          ]
+        }
+      ]
+    },
+    "financials": {
+      "file": "kavira/financials.csv",
+      "rows": 16,
+      "confidential": false,
+      "aliases": [
+        "financials",
+        "financial",
+        "p and l",
+        "pnl",
+        "profit and loss",
+        "quarterly results",
+        "results",
+        "accounts",
+        "ebitda",
+        "profit"
+      ],
+      "columns": [
+        {
+          "name": "fiscal_year",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "fy",
+            "year",
+            "years"
+          ]
+        },
+        {
+          "name": "fiscal_quarter",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "quarter",
+            "quarters",
+            "q"
+          ]
+        },
+        {
+          "name": "total_revenue",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "total revenue",
+            "quarterly revenue",
+            "top line",
+            "topline"
+          ]
+        },
+        {
+          "name": "material_cost",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "materials",
+            "material cost",
+            "cogs",
+            "cost of goods",
+            "raw material"
+          ]
+        },
+        {
+          "name": "gross_margin_pct",
+          "type": "REAL",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "gross margin",
+            "gm",
+            "gm percent",
+            "gross margin percent"
+          ]
+        },
+        {
+          "name": "employee_cost",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "employee cost",
+            "staff cost",
+            "people cost",
+            "wage bill",
+            "manpower cost"
+          ]
+        },
+        {
+          "name": "selling_promotion",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "selling",
+            "promotion",
+            "marketing spend",
+            "selling and promotion",
+            "s and p"
+          ]
+        },
+        {
+          "name": "other_expenses",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "other expenses",
+            "overheads",
+            "opex"
+          ]
+        },
+        {
+          "name": "rnd",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "r and d",
+            "research",
+            "research and development",
+            "rd spend"
+          ]
+        },
+        {
+          "name": "one_off_items",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "one off",
+            "one offs",
+            "exceptional items",
+            "one time costs"
+          ]
+        },
+        {
+          "name": "ebitda",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "operating profit",
+            "ebidta"
+          ]
+        },
+        {
+          "name": "ebitda_margin_pct",
+          "type": "REAL",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "ebitda margin",
+            "operating margin",
+            "margin"
+          ]
+        },
+        {
+          "name": "dep_amort",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "depreciation",
+            "amortisation",
+            "d and a"
+          ]
+        },
+        {
+          "name": "finance_cost",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "interest",
+            "finance costs",
+            "borrowing cost"
+          ]
+        },
+        {
+          "name": "pbt",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "profit before tax",
+            "pre tax profit"
+          ]
+        },
+        {
+          "name": "tax",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "taxes",
+            "income tax"
+          ]
+        },
+        {
+          "name": "pat",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "profit",
+            "net profit",
+            "profit after tax",
+            "bottom line",
+            "net income"
+          ]
+        },
+        {
+          "name": "pat_margin_pct",
+          "type": "REAL",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "pat margin",
+            "net margin",
+            "profit margin"
+          ]
+        }
+      ]
+    },
+    "receivables": {
+      "file": "kavira/receivables.csv",
+      "rows": 43,
+      "confidential": false,
+      "aliases": [
+        "receivables",
+        "receivable",
+        "debtors",
+        "collections",
+        "dso",
+        "outstanding",
+        "money owed",
+        "collection days"
+      ],
+      "columns": [
+        {
+          "name": "fiscal_year",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "fy",
+            "year",
+            "years"
+          ]
+        },
+        {
+          "name": "fiscal_quarter",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "quarter",
+            "quarters"
+          ]
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "branches",
+            "region",
+            "regions",
+            "office"
+          ]
+        },
+        {
+          "name": "quarter_sales",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "quarter sales",
+            "billed in the quarter"
+          ]
+        },
+        {
+          "name": "closing_receivables",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "receivables",
+            "receivable",
+            "outstanding",
+            "debtors",
+            "money owed",
+            "dues",
+            "collections due",
+            "unpaid"
+          ]
+        },
+        {
+          "name": "dso_days",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "dso",
+            "collection days",
+            "days to collect",
+            "days sales outstanding",
+            "collection period",
+            "payment delay"
+          ]
+        }
+      ]
+    },
+    "budget_vs_actual": {
+      "file": "kavira/budget_vs_actual.csv",
+      "rows": 12,
+      "confidential": false,
+      "aliases": [
+        "budget vs actual",
+        "budget",
+        "budgets",
+        "attainment",
+        "targets",
+        "plan vs actual",
+        "budget attainment"
+      ],
+      "columns": [
+        {
+          "name": "fiscal_year",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "fy",
+            "year",
+            "years"
+          ]
+        },
+        {
+          "name": "business_unit",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "unit",
+            "units",
+            "business units",
+            "branch",
+            "branches",
+            "division",
+            "divisions"
+          ]
+        },
+        {
+          "name": "budget",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "budgets",
+            "target",
+            "targets",
+            "plan",
+            "budgeted"
+          ]
+        },
+        {
+          "name": "actual",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "actuals",
+            "achieved",
+            "achievement",
+            "delivered"
+          ]
+        },
+        {
+          "name": "attainment_pct",
+          "type": "REAL",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "attainment",
+            "attainment percent",
+            "budget attainment",
+            "achievement percent",
+            "target achievement"
+          ]
+        }
+      ]
+    },
+    "stockists": {
+      "file": "kavira/stockists.csv",
+      "rows": 180,
+      "confidential": false,
+      "aliases": [
+        "stockists",
+        "stockist",
+        "distributors",
+        "distributor",
+        "dealers",
+        "dealer",
+        "wholesalers",
+        "trade partners"
+      ],
+      "columns": [
+        {
+          "name": "fiscal_year",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "fy",
+            "year",
+            "years"
+          ]
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "branches",
+            "region",
+            "regions",
+            "office"
+          ]
+        },
+        {
+          "name": "stockist_id",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": true,
+          "groupable": false,
+          "aliases": [
+            "stockist id",
+            "stockist code",
+            "id",
+            "code"
+          ]
+        },
+        {
+          "name": "town",
+          "type": "TEXT",
+          "confidential": false,
+          "identifier": false,
+          "groupable": true,
+          "aliases": [
+            "towns",
+            "city",
+            "cities",
+            "territory",
+            "territories",
+            "location"
+          ]
+        },
+        {
+          "name": "stockist_sales",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "stockist sales",
+            "stockist revenue",
+            "sales through stockist",
+            "offtake",
+            "purchases"
+          ]
+        },
+        {
+          "name": "avg_payment_days",
+          "type": "INTEGER",
+          "confidential": false,
+          "identifier": false,
+          "groupable": false,
+          "aliases": [
+            "payment days",
+            "days to pay",
+            "payment delay",
+            "credit days",
+            "payment period",
+            "average payment days"
+          ]
+        }
+      ]
+    },
     "employees": {
       "file": "employees.csv",
       "rows": 61,
@@ -184,6 +1968,7 @@
           "identifier": false,
           "groupable": false,
           "aliases": [
+            "sales",
             "revenues",
             "turnover",
             "income",
@@ -308,7 +2093,9 @@
       "role": "HR",
       "seeded": true,
       "unitLabel": "paragraph",
-      "confidential": false
+      "confidential": false,
+      "units": 40,
+      "chunks": 8
     },
     "q3_review.pptx": {
       "file": "q3_review.pptx",
@@ -316,7 +2103,9 @@
       "role": "SALES",
       "seeded": true,
       "unitLabel": "slide",
-      "confidential": false
+      "confidential": false,
+      "units": 14,
+      "chunks": 14
     },
     "leave_policy.pdf": {
       "file": "leave_policy.pdf",
@@ -325,7 +2114,27 @@
       "seeded": false,
       "unitLabel": "page",
       "confidential": false,
-      "note": "shared into the HR phone live during the tour"
+      "note": "shared into the HR phone live during the tour",
+      "units": 6,
+      "chunks": 12
+    },
+    "kavira_company_snapshot.md": {
+      "file": "kavira_company_snapshot.md",
+      "kind": "md",
+      "role": "SALES",
+      "seeded": true,
+      "unitLabel": "paragraph",
+      "confidential": false,
+      "units": 23
+    },
+    "kavira_hr_access_policy.md": {
+      "file": "kavira_hr_access_policy.md",
+      "kind": "md",
+      "role": "HR",
+      "seeded": true,
+      "unitLabel": "paragraph",
+      "confidential": false,
+      "units": 8
     }
   }
 }
