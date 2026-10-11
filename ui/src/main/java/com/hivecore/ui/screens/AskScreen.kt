@@ -77,7 +77,7 @@ import com.hivecore.ui.vm.ChatTurn
 import com.hivecore.ui.vm.Suggestion
 
 /**
- * Ask = the chat Home (spec section 17 Ask, laid out like ChatGPT / Gemini / Claude): a greeting and suggestion
+ * Ask = the chat Home (spec section 17 Ask, laid out like a chat assistant): a greeting and suggestion
  * cards when empty, then the conversation with the plan, the LOCAL / CLOUD choice and the answers inline, and the
  * composer pinned at the bottom. [statusLine] is the live swarm line under the greeting ("3 phones ready").
  */

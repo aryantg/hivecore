@@ -47,7 +47,7 @@ fun UserBubble(text: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** The swarm's turn: the hex avatar on the left and its content (text, cards) without a bubble, like Claude and Gemini. */
+/** The swarm's turn: the hex avatar on the left and its content (text, cards) without a bubble, as chat assistants lay it out. */
 @Composable
 fun SwarmTurn(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
