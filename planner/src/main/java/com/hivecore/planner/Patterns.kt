@@ -39,6 +39,8 @@ object SlotTypes {
     const val DOC = "doc"
     /** released items (blob hashes or case ids): bound by the bulk request, never parsed from text */
     const val ITEMS = "items"
+    /** the words of the request after its asking phrase ("create an image of my team" → "my team"): what a picture should show */
+    const val TEXT = "text"
 }
 
 @Serializable data class SlotSpec(
@@ -82,6 +84,8 @@ object SlotTypes {
     val needs: List<String> = emptyList(),
     /** expand once per item of this items slot (ids get 1-based suffixes; `{item}` is the item) */
     val each: String? = null,
+    /** node is dropped (and removed from its consumers' inputs) when no phone of the swarm runs its op right now */
+    @SerialName("optional_op") val optionalOp: Boolean = false,
 )
 
 @Serializable data class Pattern(
@@ -118,6 +122,8 @@ data class IntSlot(override val phrase: String, val n: Int) : SlotValue { overri
 /** order ("desc"/"asc") or cmp ("gt"/"lt") */
 data class WordSlot(override val phrase: String, override val value: String) : SlotValue
 data class DocSlot(override val phrase: String, val doc: String, val owner: String) : SlotValue { override val value get() = doc }
+/** the request's own words (a picture's subject); [phrase] and [value] are the same text */
+data class TextSlot(override val phrase: String) : SlotValue { override val value get() = phrase }
 data class ItemsSlot(val items: List<String>, val owner: String?) : SlotValue {
     override val phrase get() = ""
     override val value get() = "${items.size} items"
@@ -136,7 +142,7 @@ class Patterns(val library: PatternLibrary) {
      * type; each AGG table exists in its owner's catalog with numeric measure, groupable dims and (for sum/min/max)
      * a non-confidential column; inputs exist. AGG params = {"q", "expect": {table, metric, measure, dims, period?}}.
      */
-    fun bind(pattern: Pattern, slots: Map<String, SlotValue>, catalogs: List<Catalog>): Result<Dag> = runCatching {
+    fun bind(pattern: Pattern, slots: Map<String, SlotValue>, catalogs: List<Catalog>, availableOps: Set<Op>? = null): Result<Dag> = runCatching {
         for (s in pattern.slots) {
             val v = slots[s.name]
             if (v == null) { if (!s.optional) fail("slot ${s.name} (${s.type}) is not filled"); continue }
@@ -149,6 +155,8 @@ class Patterns(val library: PatternLibrary) {
             if (n.needs.any { slots[it] == null } || listOfNotNull(n.measure, n.count, n.doc).any { slots[it] == null }) {
                 dropped += n.id; continue
             }
+            // an optional-op node (the picture, the slide text) is left out when no phone runs its op right now
+            if (n.optionalOp && availableOps != null && n.op !in availableOps) { dropped += n.id; continue }
             val items: List<String?> = if (n.each != null) {
                 val its = (slots[n.each] as? ItemsSlot)?.items ?: fail("node ${n.id}: slot ${n.each} has no items")
                 if (its.isEmpty()) fail("node ${n.id}: no items")
@@ -256,8 +264,8 @@ class Patterns(val library: PatternLibrary) {
         const val ASSET_PATH = "swarm/patterns.json"
         const val MONTH = "month"
         val CONFIDENTIAL_METRICS = setOf("avg", "count")
-        /** Capabilities the shipped text patterns' ops run on (AGG, DOC, EXTRACT and the reduces), for a facade without the library. */
-        val DEFAULT_COVERED_CAPABILITIES = setOf("llm.json", "llm.text")
+        /** Capabilities the shipped text patterns' ops run on (AGG, DOC, EXTRACT, the generators and the reduces), for a facade without the library. */
+        val DEFAULT_COVERED_CAPABILITIES = setOf("llm.json", "llm.text", "image.gen")
         private val json = Json { ignoreUnknownKeys = true }
         private val SLOT = Regex("\\{([a-z_0-9]+)\\}")
         private val FRAGMENT = Regex("\\[([^\\[\\]]*)\\]")
@@ -290,6 +298,7 @@ class Patterns(val library: PatternLibrary) {
             SlotTypes.ORDER, SlotTypes.CMP -> v is WordSlot
             SlotTypes.DOC -> v is DocSlot
             SlotTypes.ITEMS -> v is ItemsSlot
+            SlotTypes.TEXT -> v is TextSlot
             else -> false
         }
 

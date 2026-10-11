@@ -6,6 +6,8 @@ import com.hivecore.core.ColType
 import com.hivecore.core.Confidence
 import com.hivecore.core.Dag
 import com.hivecore.core.Op
+import com.hivecore.core.OpClass
+import com.hivecore.core.OpRegistry
 import com.hivecore.core.PlannedQuestion
 import com.hivecore.core.Planner
 import com.hivecore.core.RouteDecision
@@ -43,6 +45,8 @@ class PlannerImpl(
     private val clock: () -> Long = System::currentTimeMillis,
     private val zone: ZoneId = ZoneId.systemDefault(),
     private val k: Int = 3,
+    /** ops some phone of the swarm runs right now (null = unknown): a pattern's `optional_op` nodes are dropped for the rest */
+    private val availableOps: () -> Set<Op>? = { null },
 ) : Planner {
 
     private fun explicitGrouping(q: QText, c: Candidate): Boolean {
@@ -71,6 +75,10 @@ class PlannerImpl(
         if (pp.value == null || pp.confidence < Confidence.LOW) {
             clarification = pp.top.take(2).map { it?.title ?: "none of these" }
             if (clarification.size < 2) clarification = clarification + compatible.map { it.title }.filter { it !in clarification }.take(2 - clarification.size)
+        }
+        // a heavy step the pattern cannot do without (the picture of make_image) needs a phone that runs it right now
+        availableOps()?.let { ops ->
+            pattern.dag.firstOrNull { !it.optionalOp && OpRegistry[it.op].cls == OpClass.HEAVY && it.op !in ops }?.let { return fail(unavailable(it.op)) }
         }
 
         // 2. slots
@@ -114,7 +122,7 @@ class PlannerImpl(
             return if (clarification.isNotEmpty()) clarify(null) else fail("I can't tie this plan to the question: ${errors.first()}")
         }
         // 4. bind
-        val dag = patterns.bind(pattern, slots, catalogs)
+        val dag = patterns.bind(pattern, slots, catalogs, availableOps())
         if (dag.isFailure) {
             val why = dag.exceptionOrNull()?.message ?: "bind failed"
             return if (clarification.isNotEmpty()) clarify(null) else fail("I can't build that plan: $why")
@@ -160,7 +168,14 @@ class PlannerImpl(
         SlotTypes.COUNT -> "I can't find what to count in the question (needed for ${p.id}: ${s.prompt})"
         SlotTypes.DIMENSION -> "I can't find a grouping both phones can use in the question (needed for ${p.id}: ${s.prompt})"
         SlotTypes.DOC -> "I can't find a shared, non-confidential document named in the question"
+        SlotTypes.TEXT -> "I can't tell what to draw: say what the picture should show, for example \"Create an image of a pharmacy counter at dawn\"."
         else -> "the question does not state ${s.prompt.ifEmpty { s.name }} (needed for ${p.id})"
+    }
+
+    private fun unavailable(op: Op): String = when (op) {
+        Op.GEN_IMAGE, Op.GEN_VARIANTS -> "No phone of the swarm can draw right now: a picture needs a phone on the charger with the image model loaded " +
+            "(the Models page shows which phone has it). Charts of your own figures don't need it: ask for a pitch deck."
+        else -> "No phone of the swarm runs ${op.name.lowercase().replace('_', ' ')} right now: it needs a phone on the charger with its model loaded."
     }
 
     private fun nothingFits(): String =
@@ -218,6 +233,8 @@ object Periods {
     fun find(q: QText, today: LocalDate): List<Pair<IntRange, PeriodSlot>> {
         val out = ArrayList<Pair<IntRange, PeriodSlot>>()
         val taken = ArrayList<IntRange>()
+        // year spans first ("FY2024-26", "2024 to 2026", "FY2025"): they contain the plain years the vocabulary would find
+        for ((span, slot) in yearSpans(q)) { taken += span; out += span to slot }
         for (phrase in vocabulary(q)) {
             val span = q.find(phrase, taken) ?: continue
             val slot = resolve(q.text(span), today) ?: continue
@@ -234,8 +251,48 @@ object Periods {
         return fixed + years
     }
 
+    private val YEAR4 = Regex("(fy)?(20\\d\\d)")
+    private val YEAR2 = Regex("(fy)?(\\d\\d)")
+    private val RANGE_JOIN = setOf("to", "and", "through", "till", "until")
+
+    private class Year(val y: Int, val fiscal: Boolean)
+
+    private fun year(w: String, allowShort: Boolean): Year? {
+        val s = w.lowercase()
+        YEAR4.matchEntire(s)?.let { return Year(it.groupValues[2].toInt(), it.groupValues[1].isNotEmpty()) }
+        if (!allowShort) return null
+        YEAR2.matchEntire(s)?.let { return Year(2000 + it.groupValues[2].toInt(), it.groupValues[1].isNotEmpty()) }
+        return null
+    }
+
+    /**
+     * "FY2024-26", "FY24-26", "2024-2026", "2024 to 2026" and a lone "FY2025": a span of years, fiscal (April to March,
+     * named by the year it ends in) when either end says "FY". The words come from [QText], so a hyphen is a word break.
+     */
+    fun yearSpans(q: QText): List<Pair<IntRange, PeriodSlot>> {
+        val out = ArrayList<Pair<IntRange, PeriodSlot>>()
+        var i = 0
+        val w = q.words
+        while (i < w.size) {
+            val a = year(w[i], allowShort = w[i].lowercase().startsWith("fy"))
+            if (a == null) { i++; continue }
+            var j = i + 1
+            if (j < w.size && w[j].lowercase() in RANGE_JOIN) j++
+            val b = if (j < w.size) year(w[j], allowShort = true) else null
+            val span = if (b != null && b.y >= a.y) i..j else if (a.fiscal) i..i else { i++; continue }
+            val end = b?.takeIf { span.last == j } ?: a
+            val fiscal = a.fiscal || end.fiscal
+            val slot = if (fiscal) PeriodSlot(q.text(span), "%04d-04".format(a.y - 1), "%04d-03".format(end.y))
+                else PeriodSlot(q.text(span), "%04d-01".format(a.y), "%04d-12".format(end.y))
+            out += span to slot
+            i = span.last + 1
+        }
+        return out
+    }
+
     /** Range for a vocabulary phrase relative to [today], or null when it isn't one. */
     fun resolve(phrase: String, today: LocalDate): PeriodSlot? {
+        yearSpans(QText(phrase)).singleOrNull()?.takeIf { (s, _) -> s.first == 0 && s.last == QText(phrase).words.size - 1 }?.let { return it.second.copy(phrase = phrase.trim()) }
         val p = phrase.trim().lowercase()
         val y = today.year; val m = today.monthValue
         fun ym(yy: Int, mm: Int) = "%04d-%02d".format(yy, mm)
@@ -273,8 +330,27 @@ class Candidates(private val q: QText, catalogs: List<Catalog>, routeOwners: Lis
             SlotTypes.ORDER -> words(ORDER_WORDS, used)
             SlotTypes.CMP -> words(CMP_WORDS, used)
             SlotTypes.DOC -> docs(used)
+            SlotTypes.TEXT -> subject(used)
             else -> emptyList()
         }
+    }
+
+    /**
+     * The request's own words after its asking phrase ("please create an image of my team" → "my team"): the leading
+     * politeness, verbs, articles and picture nouns are dropped, the rest is the subject as written. One candidate, or
+     * none when nothing is left ("draw something").
+     */
+    private fun subject(used: List<IntRange>): List<Candidate> {
+        val w = q.words
+        var start = 0
+        while (start < w.size && w[start].lowercase() in ASK_LEAD) start++
+        var end = w.size
+        while (end > start && (w[end - 1].lowercase() in TRAIL || used.any { end - 1 in it })) end--
+        if (start >= end) return emptyList()
+        val span = start until end
+        if (used.any { overlaps(it, span) }) return emptyList()
+        val text = q.text(span)
+        return listOf(Candidate(TextSlot(text), text, span))
     }
 
     fun default(spec: SlotSpec): SlotValue {
@@ -376,6 +452,14 @@ class Candidates(private val q: QText, catalogs: List<Catalog>, routeOwners: Lis
             "greater than" to "gt", "over" to "gt", "below" to "lt", "under" to "lt", "less than" to "lt", "lower than" to "lt")
         val NUMBER_WORDS = mapOf("one" to 1, "two" to 2, "three" to 3, "four" to 4, "five" to 5, "six" to 6, "seven" to 7,
             "eight" to 8, "nine" to 9, "ten" to 10)
+        /** words a picture request opens with, before its subject */
+        val ASK_LEAD: Set<String> = setOf("please", "pls", "hey", "hi", "can", "could", "would", "will", "you", "u", "i", "we", "d", "want",
+            "need", "like", "to", "just", "now", "me", "us", "a", "an", "the", "some", "new", "another", "nice", "quick", "create", "make",
+            "generate", "draw", "render", "produce", "design", "sketch", "paint", "illustrate", "give", "show", "get", "image", "images",
+            "picture", "pictures", "illustration", "illustrations", "drawing", "drawings", "artwork", "visual", "visuals", "graphic",
+            "graphics", "pic", "pics", "of", "off", "for", "showing", "depicting", "about", "with", "that", "which", "shows", "represents")
+        /** words dropped from the end of a subject */
+        val TRAIL: Set<String> = setOf("please", "pls", "now", "thanks", "thank", "you")
 
         /** "onboarding_checklist.docx" → "onboarding checklist" */
         fun docPhrase(name: String): String = name.substringBeforeLast('.').replace('_', ' ').replace('-', ' ')
@@ -433,6 +517,7 @@ object PlanGrounding {
                 if (catalogs.none { it.node == v.owner && v.doc in it.docs }) errs += "$name: ${v.doc} is not a shared document of ${v.owner}"
                 else said(name, v.phrase)
             }
+            is TextSlot -> if (v.phrase.isBlank()) errs += "$name is empty" else said(name, v.phrase)
             is ItemsSlot -> {}
         }
         return errs

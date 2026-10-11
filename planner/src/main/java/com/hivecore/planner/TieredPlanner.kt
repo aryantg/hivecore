@@ -108,9 +108,10 @@ class TieredPlannerImpl(
         if (r.plan != null && r.compiled?.ok == true) return remember(key, r.copy(note = why))
         SLog.w(TAG, "T2 failed (${r.note}); T1 result stands")
         // spec 7.4: T1's best candidate plus a clarification listing the top two readings, with the cloud failure noted
+        // (spec 17: the refusal stays one plain sentence; the cloud failure goes to the details)
         val note = "cloud planner: ${r.note ?: "no plan"}"
-        return remember(key, if (local.plan != null) local.copy(note = note)
-            else local.copy(refusal = (local.refusal ?: "no plan") + " ($note)", note = note))
+        return remember(key, local.copy(refusal = local.refusal ?: if (local.plan == null) "no plan" else null,
+            note = listOfNotNull(local.note, note).joinToString("; ")))
     }
 
     /** Why T1's result is not enough (null = it is). */
@@ -127,7 +128,10 @@ class TieredPlannerImpl(
     }
 
     private fun fromT1(route: RouteDecision, t1: Result<PlannedQuestion>?, catalogs: List<Catalog>, caps: CapabilitySummary): TieredPlan {
-        if (t1 == null) return TieredPlan(route, PlanTier.T0, refusal = "That isn't a question over the swarm's tables or documents (${route.reason}).")
+        if (t1 == null) return TieredPlan(route, PlanTier.T0, note = route.reason, refusal = if (route.owners.isEmpty())
+            "That isn't about the data on your phones, and it doesn't ask for a picture or a deck."
+            else "That is about the data on ${route.owners.size} phone${if (route.owners.size == 1) "" else "s"}, but I can't turn it into steps: " +
+                "ask for a comparison, a ratio, a trend, a ranking, a check against the average or a deck.")
         val pq = t1.getOrElse { e -> return TieredPlan(route, PlanTier.T1, refusal = e.message ?: "this question cannot be planned") }
         if (pq.dag.tasks.isEmpty()) return TieredPlan(route, PlanTier.T1, pq, null)
         return TieredPlan(route, PlanTier.T1, pq, compile(pq, catalogs, caps))

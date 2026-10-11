@@ -1,5 +1,5 @@
 {
-  "version": "1",
+  "version": "3",
   "patterns": [
     {
       "id": "per_unit",
@@ -151,6 +151,40 @@
         {"id": "r", "op": "RENDER", "in": ["e1", "e2"], "params": {"kind": "cited_points"}}
       ],
       "output": "r"
+    },
+    {
+      "id": "deck_growth",
+      "title": "a slide deck on how a measure moved over the years: a chart, highlights and an illustration (pitch deck on sales FY2024-26)",
+      "reading": "slide deck on {measure}[ {period}][ by {by}]",
+      "requires": ["RENDER"],
+      "cues": ["deck", "slides", "slideshow", "presentation"],
+      "slots": [
+        {"name": "measure", "type": "measure", "prompt": "the amount the deck is about"},
+        {"name": "period", "type": "period", "optional": true, "prompt": "the years covered"},
+        {"name": "by", "type": "dimension", "optional": true, "prompt": "the grouping"}
+      ],
+      "dag": [
+        {"id": "a", "op": "AGG", "q": "{measure} by month[ and {by}][ {period}]", "measure": "measure", "dims": ["month", "by"], "period": "period"},
+        {"id": "w", "op": "LLM_MAP", "in": ["a"], "optional_op": true, "params": {"template": "Write the words of a short business pitch deck about {measure} {period}. The figures below are the only facts: quote them as given and invent no numbers. Reply with exactly this JSON object and nothing else: {\"title\": \"<under 60 characters>\", \"subtitle\": \"<one line>\", \"headline\": \"<one sentence on the overall trend>\", \"bullets\": [\"<highlight 1>\", \"<highlight 2>\", \"<highlight 3>\"], \"closing\": [\"<next step 1>\", \"<next step 2>\"]}", "schema": {"type": "object", "properties": {"title": {"type": "string", "maxLength": 60}, "subtitle": {"type": "string", "maxLength": 90}, "headline": {"type": "string", "maxLength": 120}, "bullets": {"type": "array", "items": {"type": "string", "maxLength": 110}, "minItems": 2, "maxItems": 5}, "closing": {"type": "array", "items": {"type": "string", "maxLength": 110}, "minItems": 1, "maxItems": 4}}, "required": ["title", "headline", "bullets"]}, "maxTokens": 500, "replicate": "none"}},
+        {"id": "i", "op": "GEN_IMAGE", "optional_op": true, "params": {"prompt": "clean modern illustration for a business presentation about {measure}: an abstract rising bar chart, warm amber and dark slate colours, flat design, no text", "negative": "text, letters, watermark, blurry, people", "size": 512, "steps": 20, "seed": 7}},
+        {"id": "d", "op": "RENDER", "in": ["a", "w", "i"], "params": {"kind": "deck", "measure": "{measure}", "period": "{period}"}}
+      ],
+      "output": "d"
+    },
+    {
+      "id": "make_image",
+      "title": "an illustration drawn on a phone from a description (create an image of a pharmacy counter)",
+      "reading": "an illustration of {subject}",
+      "requires": ["GEN_IMAGE"],
+      "cues": ["draw", "sketch", "illustration", "image of", "picture of", "logo", "poster"],
+      "slots": [
+        {"name": "subject", "type": "text", "prompt": "what the picture should show"}
+      ],
+      "dag": [
+        {"id": "i", "op": "GEN_IMAGE", "params": {"prompt": "{subject}, clean modern flat illustration, warm amber and dark slate colours, soft light, detailed, high quality", "negative": "text, letters, words, watermark, signature, blurry, deformed, low quality", "size": 512, "steps": 20, "seed": 7}},
+        {"id": "p", "op": "RENDER", "in": ["i"], "params": {"kind": "picture", "subject": "{subject}"}}
+      ],
+      "output": "p"
     },
     {
       "id": "bulk_ocr_close",

@@ -82,6 +82,10 @@ class SwarmRouterImplTest {
             // no owner: existing pipeline even with a cue
             Row("Compare the weather in Mumbai and Delhi", false, listOf(Op.DIFF), emptyList()),
             Row("What is the capital of France?", false, emptyList(), emptyList()),
+            // cues-3: a picture needs no owner
+            Row("Create an image of my team", true, listOf(Op.GEN_IMAGE), emptyList()),
+            Row("Generate images of what the charts would look like for the data", true, listOf(Op.GEN_IMAGE), emptyList()),
+            Row("Draw a rising revenue chart by region", true, listOf(Op.GEN_IMAGE), listOf("sales")),
         )
         assertTrue(rows.size >= 25)
         for (r in rows) {

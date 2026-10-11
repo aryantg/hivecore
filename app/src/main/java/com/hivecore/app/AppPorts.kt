@@ -28,11 +28,13 @@ import com.hivecore.engine.ProfileBeacon
 import com.hivecore.engine.SwarmNode
 import com.hivecore.engine.workload.RecipeDef
 import com.hivecore.ledger.Ledger
+import com.hivecore.mesh.LanPairPing
 import com.hivecore.mesh.MeshJson
 import com.hivecore.mesh.MeshRouter
 import com.hivecore.mesh.MsgType
 import com.hivecore.mesh.PeerStore
 import com.hivecore.mesh.RosterStore
+import com.hivecore.mesh.Wire
 import com.hivecore.node.data.DataStore
 import com.hivecore.node.docs.DocStore
 import com.hivecore.planner.CapabilitySummary
@@ -67,7 +69,9 @@ import com.hivecore.ui.ports.MediaItem
 import com.hivecore.ui.ports.MemberView
 import com.hivecore.ui.ports.ModeEstimate
 import com.hivecore.ui.ports.ModelsPort
+import com.hivecore.ui.ports.PairPingView
 import com.hivecore.ui.ports.PhoneModelState
+import com.hivecore.ui.ports.PingReplyView
 import com.hivecore.ui.ports.PlanOptions
 import com.hivecore.ui.ports.PlanStepView
 import com.hivecore.ui.ports.Refusal
@@ -80,6 +84,7 @@ import com.hivecore.ui.ports.SettingsPort
 import com.hivecore.ui.ports.SwarmPort
 import com.hivecore.ui.ports.Visibility
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -88,6 +93,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
@@ -112,6 +118,8 @@ class SwarmPortImpl(
     /** item 6: the relay side of an invite (opens the token with the relay) */
     private val onInviteOpened: suspend (Invite) -> Unit = {},
     private val clock: () -> Long = System::currentTimeMillis,
+    /** "Ping nearby" over the Wi-Fi; null when the LAN mesh is off (the actions then fail with a plain message) */
+    private val pairPing: LanPairPing? = null,
 ) : SwarmPort {
     private val rosterState = MutableStateFlow(rosterView())
     override val roster: StateFlow<RosterView> = rosterState
@@ -122,6 +130,10 @@ class SwarmPortImpl(
     private val sasState = MutableStateFlow<List<SasView>>(emptyList())
     override val sasPrompts: StateFlow<List<SasView>> = sasState
     private val prompts = LinkedHashMap<String, SasPrompt>()
+    private val pingsState = MutableStateFlow<List<PairPingView>>(emptyList())
+    override val pairPings: StateFlow<List<PairPingView>> = pingsState
+    private val repliesState = MutableStateFlow<List<PingReplyView>>(emptyList())
+    override val pingReplies: StateFlow<List<PingReplyView>> = repliesState
 
     init {
         scope.launch { pairing.prompts.collect { p -> synchronized(prompts) { prompts[p.handshakeId] = p }; publishSas() } }
@@ -133,14 +145,49 @@ class SwarmPortImpl(
             }
         }
         scope.launch { while (isActive) { refresh(); delay(3_000) } }
+        if (pairPing != null) {
+            // a ping from a phone we already hold the key of is dropped: joining it would only say "already paired"
+            scope.launch { pairPing.requests.collect { reqs -> pingsState.value = reqs.filter { !alreadyPaired(it.payload) }.map { PairPingView(it.id, it.fromName, it.ts) } } }
+            scope.launch { pairPing.replies.collect { r -> repliesState.update { (listOf(PingReplyView(r.fromName, r.approved, r.ts)) + it).take(REPLIES_KEPT) } } }
+        }
+    }
+
+    private fun alreadyPaired(payload: String): Boolean {
+        val id = Invite.fromText(payload)?.pubkey?.let { Wire.nodeIdOf(it) } ?: return false
+        return id == selfId || peerStore.get(id) != null
+    }
+
+    /** Ping nearby: a fresh invite (same token rules as the QR) broadcast to every phone on this Wi-Fi. */
+    override suspend fun pingNearby(): Result<InviteView> = runCatching {
+        val pp = pairPing ?: throw IllegalStateException("pinging needs the LAN mesh")
+        if (!pp.running) throw IllegalStateException("the mesh is not running yet")
+        val g = groupId()
+        if (rosterStore.current(g) == null) admin.create(g, selfName())?.let { gossip(MsgType.ROSTER, MeshJson.encode(it)) }
+        val inv = pairing.startInvite(g)
+        runCatching { onInviteOpened(inv) }.onFailure { SLog.w(TAG, "relay invite: ${it.message}") }
+        val sent = withContext(Dispatchers.IO) { pp.ping(inv.qrPayload()).getOrThrow() }
+        repliesState.value = emptyList()
+        SLog.d(TAG, "pinged ${sent.sentTo} addresses")
+        InviteView(inv.link(), inv.issuedTs + Invite.TOKEN_TTL_MS)
+    }
+
+    override suspend fun answerPing(id: String, approve: Boolean): Result<Unit> {
+        val pp = pairPing ?: return Result.failure(IllegalStateException("pinging needs the LAN mesh"))
+        val ping = pp.requests.value.firstOrNull { it.id == id } ?: return Result.failure(IllegalStateException("that request is gone"))
+        withContext(Dispatchers.IO) { pp.reply(ping, approve) }.onFailure { SLog.w(TAG, "ping reply: ${it.message}") }
+        if (!approve) return Result.success(Unit)
+        return join(ping.payload).map { }
     }
 
     private fun publishSas() { sasState.value = synchronized(prompts) { prompts.values.map { SasView(it.handshakeId, it.peerName, it.digits) } } }
 
     private fun rosterView(): RosterView {
         val r = rosterStore.latest() ?: return RosterView("", 0, "", emptyList())
-        return RosterView(r.groupId, r.version, r.admin, r.members.map { MemberView(it.nodeId, it.name, it.nodeId == r.admin) })
+        return RosterView(r.groupId, r.version, r.admin, r.members.map { MemberView(it.nodeId, liveName(it.nodeId) ?: it.name, it.nodeId == r.admin) })
     }
+
+    /** The roster keeps the name from pairing time; the self name and peers' HELLO names are fresher. */
+    private fun liveName(nodeId: String): String? = if (nodeId == selfId) selfName() else router.peerName(nodeId)
 
     /** Re-reads the roster, the fresh profiles and the pinned-but-not-yet-admitted peers. */
     fun refresh() {
@@ -193,7 +240,7 @@ class SwarmPortImpl(
 
     private suspend fun gossip(type: MsgType, body: String) { runCatching { router.broadcast(type, body) }.onFailure { SLog.w(TAG, "$type gossip: ${it.message}") } }
 
-    private companion object { const val TAG = "SwarmPort" }
+    private companion object { const val TAG = "SwarmPort"; const val REPLIES_KEPT = 12 }
 }
 
 /** Spec 17 (Models) over the runtime track: the catalog, each phone's state from its profile, load / unload / BENCH / pin. */
@@ -401,8 +448,22 @@ class AskPortImpl(
     private val recipes: () -> List<RecipeDef>,
     private val escalator: Escalator,
     private val nameOf: (String) -> String,
+    /** the pattern library, for the guide's account of what the swarm can plan (null = not loaded) */
+    private val patterns: com.hivecore.planner.Patterns? = null,
 ) : AskPort {
     private class Held(val plan: TieredPlan, val catalogs: List<Catalog>, val recipe: RecipeDef?, val choice: ExecutionChoice? = null)
+
+    /** What the guide says about the swarm right now: the catalogs, whether any phone draws, the patterns and recipes. */
+    private fun facts(): com.hivecore.engine.guide.SwarmFacts {
+        val cats = catalogs().sortedBy { it.node != selfId }
+        return com.hivecore.engine.guide.SwarmFacts(
+            phones = cats.map { c -> com.hivecore.engine.guide.PhoneFacts(if (c.node == selfId) selfName else c.nodeName, c.tables.map { it.name }, c.docs, self = c.node == selfId) },
+            canDraw = com.hivecore.core.Op.GEN_IMAGE in caps().ops,
+            patterns = patterns?.textPatterns?.associate { it.id to it.title } ?: emptyMap(),
+            recipes = recipes().map { it.title },
+            examples = com.hivecore.ui.vm.AskSuggestions.DEFAULT.filter { it.kind == com.hivecore.ui.vm.Suggestion.Kind.ASK }.map { it.request },
+        )
+    }
 
     private val held = object : LinkedHashMap<String, Held>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Held>?): Boolean = size > 32
@@ -419,9 +480,16 @@ class AskPortImpl(
                 ModeEstimate(RunMode.LOCAL, 0, 0.0, "nothing leaves the phones", phones, "${r.title}: ${r.produces}"), null,
                 cloudBlockedReason = "recipes run on the phones")
         }
+        // a question about the swarm itself is answered from the catalog at once, with no plan (spec amendment "the guide")
+        com.hivecore.engine.guide.SwarmGuide.answer(q, facts())?.let { return PlanOptions.Answered(com.hivecore.ui.ports.guideAnswer(it, selfName)) }
         val cats = catalogs()
         val tp = try { planner.plan(q, cats, caps()) } catch (e: Exception) { return PlanOptions.Refused(Refusal(e.message ?: "planning failed")) }
-        val pq = tp.plan ?: return PlanOptions.Refused(Refusal(tp.refusal ?: "That isn't a question the swarm can plan.", detail = tp.note))
+        val pq = tp.plan ?: run {
+            // spec 17: one plain sentence, and for a question the planner could not place at all, what to ask instead
+            val sentence = tp.refusal ?: "That isn't a question the swarm can plan."
+            val hint = if (tp.tier == com.hivecore.planner.PlanTier.T0) " " + com.hivecore.engine.guide.SwarmGuide.hint(facts()) else ""
+            return PlanOptions.Refused(Refusal(sentence + hint, detail = tp.note))
+        }
         if (tp.clarification.isNotEmpty() || pq.confidence < Confidence.LOW) {
             val readings = tp.clarification.ifEmpty { listOf(q) }
             return PlanOptions.Clarify(q, readings, pq.confidence)
@@ -507,7 +575,8 @@ class AskPortImpl(
             else -> AnswerBadge.UNVERIFIED
         }
         return AskAnswer(UUID.randomUUID().toString(), summary?.planHash ?: plan.planHash, a.text, a.provenance, badge, steps, mode,
-            notes = a.notes, elapsedMs = a.timing.totalMs ?: 0L)
+            notes = a.notes, elapsedMs = a.timing.totalMs ?: 0L, deck = com.hivecore.engine.deck.Deck.fromJson(a.artifact),
+            picture = com.hivecore.engine.picture.Picture.fromJson(a.artifact))
     }
 
     override fun notAccurate(answer: AskAnswer, stepId: String?): Flow<AskEvent> = flow {

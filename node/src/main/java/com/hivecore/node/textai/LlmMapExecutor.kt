@@ -8,6 +8,7 @@ import com.hivecore.core.LlmBackend
 import com.hivecore.core.LlmEngine
 import com.hivecore.core.Op
 import com.hivecore.core.OpExecutor
+import com.hivecore.core.SLog
 import com.hivecore.core.TaskSpec
 import com.hivecore.engine.JsonSchemaValidator
 import com.hivecore.engine.SchemaValidator
@@ -54,14 +55,21 @@ class LlmMapExecutor(
         val out = items.map { u ->
             val raw = llm.generate(messages(template, u.text, schema), GenParams(maxTokens = maxTokens, stopOnBalancedJson = true, grammar = grammar))
                 .getOrThrow().text
-            val value = parse(raw) ?: throw IllegalStateException("rejected: item ${u.key}: the reply is not exactly one JSON value")
-            validator.validate(value, schema)?.let { throw IllegalStateException("rejected: item ${u.key}: $it") }
+            val value = parse(raw) ?: run {
+                SLog.w(TAG, "item ${u.key}: not one JSON value: ${raw.take(300).replace('\n', ' ')}")
+                throw IllegalStateException("rejected: item ${u.key}: the reply is not exactly one JSON value")
+            }
+            validator.validate(value, schema)?.let {
+                SLog.w(TAG, "item ${u.key}: $it in ${raw.take(300).replace('\n', ' ')}")
+                throw IllegalStateException("rejected: item ${u.key}: $it")
+            }
             JsonObject(linkedMapOf("item" to JsonPrimitive(u.key), "output" to value))
         }
         JsonObject(mapOf("items" to JsonArray(out)))
     }
 
     companion object {
+        private const val TAG = "LlmMap"
         const val TEMPLATE = "template"
         const val MAX_TOKENS = "maxTokens"
         const val DEFAULT_MAX_TOKENS = 256

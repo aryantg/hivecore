@@ -1,6 +1,8 @@
 package com.hivecore.ui.ports
 
 import com.hivecore.core.Provenance
+import com.hivecore.engine.deck.Deck
+import com.hivecore.engine.picture.Picture
 import kotlinx.coroutines.flow.Flow
 
 // Spec section 17 (Ask) and section 9 (LOCAL / CLOUD): what the Ask screen needs from the planner, the compiler and
@@ -71,6 +73,12 @@ sealed interface PlanOptions {
 
     /** The compiler or the owner refused (spec section 7.4, 7.6). */
     data class Refused(val refusal: Refusal) : PlanOptions
+
+    /**
+     * A question about the swarm itself ("what can you do", "what can you create an image of"), answered at once from
+     * the catalog and the capability summary by `SwarmGuide`: no plan, no run, no model.
+     */
+    data class Answered(val answer: AskAnswer) : PlanOptions
 }
 
 /** The answer card: text, provenance per phone, badge, and the steps (cloud ones flagged) for "not accurate". */
@@ -87,9 +95,20 @@ data class AskAnswer(
     val notes: List<String> = emptyList(),
     val costInr: Double = 0.0,
     val elapsedMs: Long = 0,
+    /** the slide deck a deck plan produced (spec amendment "decks"): shown as slides under the answer, with its .pptx */
+    val deck: Deck? = null,
+    /** the illustration a picture plan produced (spec amendment "pictures"): shown under the answer, with Open / Share */
+    val picture: Picture? = null,
 ) {
     val cloudSteps: List<PlanStepView> get() = steps.filter { it.cloud }
 }
+
+/** The guide's answer to a question about the swarm (`PlanOptions.Answered`): no steps, badged verified because it is read from the catalog. */
+fun guideAnswer(text: String, phone: String): AskAnswer = AskAnswer(
+    java.util.UUID.randomUUID().toString(), "", text,
+    listOf(Provenance(phone, "answered from the swarm's catalog and capabilities; no model ran")),
+    AnswerBadge.VERIFIED, emptyList(), RunMode.LOCAL,
+)
 
 /** Progress of a running plan. */
 sealed interface AskEvent {

@@ -26,6 +26,12 @@ data class InviteView(val link: String, val expiresTs: Long)
 /** The 6 digits both phones show for one handshake; confirmed on both before any key is pinned (spec section 6.2). */
 data class SasView(val handshakeId: String, val peerName: String, val digits: String)
 
+/** A pair request another phone on this Wi-Fi sent ("Ping nearby"); Approve joins its invite, Deny tells it so. */
+data class PairPingView(val id: String, val fromName: String, val ts: Long)
+
+/** What a pinged phone answered to this phone's ping. */
+data class PingReplyView(val fromName: String, val approved: Boolean, val ts: Long)
+
 interface SwarmPort {
     val selfId: String
     val roster: StateFlow<RosterView>
@@ -45,10 +51,24 @@ interface SwarmPort {
     /** Confirm (true) or reject (false) the digits of one handshake. */
     suspend fun confirmSas(handshakeId: String, matches: Boolean): Result<Unit>
 
+    // ---- "Ping nearby": pair with every phone on this Wi-Fi without a QR scan ----
+    /** Pair requests other phones sent to this one and nobody answered yet, oldest first. */
+    val pairPings: StateFlow<List<PairPingView>> get() = NO_PINGS
+    /** Answers to this phone's pings, newest first (this session only). */
+    val pingReplies: StateFlow<List<PingReplyView>> get() = NO_REPLIES
+    /** Mints a fresh invite and broadcasts it to every phone on the Wi-Fi; they see Approve / Deny. Unsupported on this build by default. */
+    suspend fun pingNearby(): Result<InviteView> = Result.failure(UnsupportedOperationException("pinging needs the LAN mesh"))
+    /** Approve (joins the invite the ping carries; the SAS then appears in [sasPrompts]) or deny one request. */
+    suspend fun answerPing(id: String, approve: Boolean): Result<Unit> = Result.failure(UnsupportedOperationException("pinging needs the LAN mesh"))
+
     // ---- admin actions (spec section 6.4) ----
     suspend fun approve(nodeId: String): Result<Unit>
     suspend fun revoke(nodeId: String): Result<Unit>
     suspend fun handOver(nodeId: String): Result<Unit>
 
-    companion object { val NO_WARNINGS: StateFlow<List<String>> = MutableStateFlow(emptyList()) }
+    companion object {
+        val NO_WARNINGS: StateFlow<List<String>> = MutableStateFlow(emptyList())
+        val NO_PINGS: StateFlow<List<PairPingView>> = MutableStateFlow(emptyList())
+        val NO_REPLIES: StateFlow<List<PingReplyView>> = MutableStateFlow(emptyList())
+    }
 }

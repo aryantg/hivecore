@@ -80,11 +80,23 @@
             </intent-filter>
         </activity>
 
+        <!-- "Ping nearby": Approve / Deny on the pair-request notification -->
+        <receiver android:name=".app.pairing.PairPingReceiver" android:exported="false" />
+
         <!-- Scan QR (spec 17): returns the swarm://join link to the Swarm screen -->
         <activity
             android:name=".app.demo.ScanActivity"
             android:exported="false"
             android:theme="@style/Theme.HiveCore" />
+
+        <!-- Produced files (a deck's .pptx) open in other apps through content URIs; nothing under files/ is world-readable -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/shared_files" />
+        </provider>
 
         <!-- Plan consent (spec 7.6, 17): one screen and one fingerprint for the whole plan, over the lock screen -->
         <activity

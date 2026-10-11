@@ -46,6 +46,8 @@ XxxScreen(state, callbacks...)    stateless; one HiveScreen; previews
 | A single button | `HiveButton(action, ButtonKind)` |
 | A row with an avatar or icon | `ListRow` + `Avatar` |
 | Steps, figures, timelines | `StepList` |
+| A deck in an answer | `DeckCard` (thumbnails + Present / Open / Share), `DeckSheet` (the pager), `SlideView` |
+| A picture in an answer | `PictureCard` (the PNG a phone drew + Open / Share); `GeneratedImage` for any generated PNG by path |
 | One choice of a few | `SegmentedChoice` |
 | Settings | `PreferenceGroup` + `SwitchRow` / `KeyValue` / `PreferenceDivider` |
 | Text input | `HiveTextField`, `IntField`, `DoubleField`, `SaveableTextField` |

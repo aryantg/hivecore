@@ -37,6 +37,27 @@ object SwarmIntegration {
         }
         swarm.requestBatteryExemption = { if (!WorkerService.isBatteryExempt(activity)) WorkerService.requestBatteryExemption(activity) }
         graph.jobs.copyText = { copy("HiveCore result", it) }
+        // a produced file (a deck's .pptx, a picture's .png) leaves the app only through the file provider, as a content URI
+        graph.ask.openFile = { path -> withFile(activity, path) { uri -> Intent(Intent.ACTION_VIEW).setDataAndType(uri, mimeOf(path)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
+        graph.ask.shareFile = { path -> withFile(activity, path) { uri ->
+            Intent.createChooser(Intent(Intent.ACTION_SEND).setType(mimeOf(path)).putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                if (path.endsWith(".png")) "Share the picture" else "Share the deck") } }
+    }
+
+    private fun withFile(activity: ComponentActivity, path: String, intent: (android.net.Uri) -> Intent) {
+        val f = java.io.File(path)
+        if (!f.isFile) { SLog.w(TAG, "file is gone: $path"); return }
+        runCatching {
+            val uri = androidx.core.content.FileProvider.getUriForFile(activity, "${activity.packageName}.files", f)
+            activity.startActivity(intent(uri))
+        }.onFailure { SLog.e(TAG, "open/share failed for $path", it) }
+    }
+
+    private fun mimeOf(path: String): String = when (path.substringAfterLast('.', "").lowercase()) {
+        "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        "png" -> "image/png"
+        "pdf" -> "application/pdf"
+        else -> "application/octet-stream"
     }
 
     private const val TAG = "SwarmIntegration"

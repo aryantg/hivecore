@@ -32,17 +32,33 @@ class AskViewModelTest {
         return AskViewModel(port, prefs, backgroundScope, clock = { 1_000L })
     }
 
-    @Test fun askPolicyShowsPlanPanelThenRunsTheChosenMode() = runTest {
+    /** Every plan comes back with LOCAL unavailable, so the panel waits for a choice. */
+    private fun noLocal() {
+        port.planFor = { q -> FakeAskPort.defaultPlan(q).let { if (it is PlanOptions.Ready) it.copy(local = null, localBlockedReason = "no phone holds the model") else it } }
+    }
+
+    @Test fun askPolicyStartsLocalWithoutAChoice() = runTest {
         val vm = vm()
         port.delayMs = 50
         vm.setRequest("Read the invoice photos into a table")
         vm.submit(); runCurrent()
         assertEquals(Phase.Planning, vm.state.value.phase)
         settle()
+        val s = vm.state.value
+        assertEquals(Phase.Idle, s.phase)
+        assertEquals(listOf(RunMode.LOCAL), port.runs.map { it.second })
+        assertEquals(AnswerBadge.VERIFIED, s.history.single().answer!!.badge)
+        assertEquals(RunMode.LOCAL, s.history.single().mode)
+    }
+
+    @Test fun askPolicyWaitsOnThePanelWhenLocalIsUnavailableThenRunsTheChosenMode() = runTest {
+        noLocal()
+        val vm = vm()
+        port.delayMs = 50
+        vm.setRequest("Read the invoice photos into a table"); vm.submit(); settle()
         val choosing = vm.state.value.phase as Phase.Choosing
         assertEquals(3, choosing.options.plan.steps.size)
         assertEquals("OCR · Accounts · 1.2 s ✓", AskViewModel.stepLine(choosing.options.plan.steps[0]))
-        assertEquals("LOCAL · about 4.1 s on 3 phones · ₹0 · nothing leaves the phones", AskViewModel.estimateLine(choosing.options.local!!))
         assertEquals("CLOUD · about 2.6 s on 1 phone · ₹1.20 · prompt text and 12 KB of released rows for EXTRACT", AskViewModel.estimateLine(choosing.options.cloud!!))
         assertTrue("nothing runs before the choice", port.runs.isEmpty())
 
@@ -84,7 +100,7 @@ class AskViewModelTest {
         assertTrue(c.confidence < 0.5)
         vm.answerClarification("revenue by region"); settle()
         assertEquals(listOf("revenue per rep or revenue by region?", "revenue by region"), port.planned)
-        assertTrue(vm.state.value.phase is Phase.Choosing)
+        assertEquals(listOf(RunMode.LOCAL), port.runs.map { it.second })
     }
 
     @Test fun refusalLandsInHistoryInPlainWordsWithPlanHashAndStep() = runTest {
@@ -97,6 +113,7 @@ class AskViewModelTest {
     }
 
     @Test fun cloudBlockedByPrivateLineageCannotBeChosen() = runTest {
+        noLocal()
         val vm = vm()
         vm.setRequest("extract the private rows"); vm.submit(); settle()
         val o = (vm.state.value.phase as Phase.Choosing).options
@@ -149,12 +166,27 @@ class AskViewModelTest {
         assertNotNull(r.planHash)
     }
 
+    @Test fun aGuideAnswerLandsInHistoryWithoutARun() = runTest {
+        port.planFor = { PlanOptions.Answered(com.hivecore.ui.ports.guideAnswer("I can draw an illustration of anything you describe.", "Accounts")) }
+        val vm = vm()
+        vm.setRequest("what can you create an image of"); vm.submit()
+        runCurrent()
+        val h = vm.state.value.history.single()
+        val a = (h.outcome as AskViewModel.Outcome.Answer).answer
+        assertEquals("I can draw an illustration of anything you describe.", a.text)
+        assertEquals(AnswerBadge.VERIFIED, a.badge)
+        assertTrue(a.steps.isEmpty())
+        assertEquals(Phase.Idle, vm.state.value.phase)
+        assertTrue("nothing ran", port.runs.isEmpty())
+    }
+
     @Test fun defaultModeFollowsThePolicy() {
         val plan = FakeAskPort.samplePlan("q")
         val local = ModeEstimate(RunMode.LOCAL, 5_000, 0.0, "nothing", 3)
         val cloud = ModeEstimate(RunMode.CLOUD, 2_000, 1.0, "prompt", 1)
         val both = PlanOptions.Ready(plan, local, cloud)
-        assertNull(AskViewModel.defaultMode(CloudPolicy.ASK, both))
+        assertEquals(RunMode.LOCAL, AskViewModel.defaultMode(CloudPolicy.ASK, both))
+        assertNull(AskViewModel.defaultMode(CloudPolicy.ASK, both.copy(local = null)))
         assertEquals(RunMode.LOCAL, AskViewModel.defaultMode(CloudPolicy.LOCAL_UNLESS_IMPOSSIBLE, both))
         assertEquals(RunMode.CLOUD, AskViewModel.defaultMode(CloudPolicy.FASTEST, both))
         assertEquals(RunMode.LOCAL, AskViewModel.defaultMode(CloudPolicy.FASTEST, both.copy(cloud = null)))

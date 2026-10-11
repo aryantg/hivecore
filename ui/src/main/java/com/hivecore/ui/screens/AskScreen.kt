@@ -1,7 +1,6 @@
 package com.hivecore.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,8 +29,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -66,7 +63,6 @@ import com.hivecore.ui.design.TypingIndicator
 import com.hivecore.ui.design.UserBubble
 import com.hivecore.ui.ports.AnswerBadge
 import com.hivecore.ui.ports.AskAnswer
-import com.hivecore.ui.ports.CloudPolicy
 import com.hivecore.ui.ports.ModeEstimate
 import com.hivecore.ui.ports.PlanOptions
 import com.hivecore.ui.ports.RunMode
@@ -75,10 +71,11 @@ import com.hivecore.ui.vm.AskSuggestions
 import com.hivecore.ui.vm.AskViewModel
 import com.hivecore.ui.vm.ChatTurn
 import com.hivecore.ui.vm.Suggestion
+import com.hivecore.engine.deck.Deck
 
 /**
  * Ask = the chat Home (spec section 17 Ask, laid out like a chat assistant): a greeting and suggestion
- * cards when empty, then the conversation with the plan, the LOCAL / CLOUD choice and the answers inline, and the
+ * cards when empty, then the conversation with the plan, the run option and the answers inline, and the
  * composer pinned at the bottom. [statusLine] is the live swarm line under the greeting ("3 phones ready").
  */
 @Composable
@@ -88,7 +85,8 @@ fun AskRoute(vm: AskViewModel, onOpenJob: (String) -> Unit = {}, onOpenRecipe: (
     AskScreen(state, onRequest = vm::setRequest, onSubmit = vm::submit, onCancel = vm::cancel, onChoose = vm::choose, onReading = vm::answerClarification,
         onNotAccurate = { item, step -> vm.notAccurate(item, step) }, onToggleSteps = vm::toggleSteps, onOpenJob = vm::openJob,
         onClearError = vm::clearError, onClearHistory = vm::clearHistory, onDismissMessage = vm::dismissMessage,
-        onSuggestion = vm::useSuggestion, onPolicy = vm::setPolicy, onAttach = { onOpenRecipe("photo_text") }, statusLine = statusLine)
+        onSuggestion = vm::useSuggestion, onAttach = { onOpenRecipe("photo_text") }, statusLine = statusLine,
+        onPresent = vm::present, onCloseDeck = vm::closeDeck, onOpenFile = { vm.openFile(it) }, onShareFile = { vm.shareFile(it) })
 }
 
 @Composable
@@ -107,11 +105,15 @@ fun AskScreen(
     onDismissMessage: () -> Unit,
     modifier: Modifier = Modifier,
     onSuggestion: (Suggestion) -> Unit = {},
-    onPolicy: (CloudPolicy) -> Unit = {},
     onAttach: (() -> Unit)? = null,
     statusLine: String? = null,
+    onPresent: (Deck) -> Unit = {},
+    onCloseDeck: () -> Unit = {},
+    onOpenFile: ((String) -> Unit)? = null,
+    onShareFile: ((String) -> Unit)? = null,
 ) {
     val thread = state.thread
+    state.presenting?.let { DeckSheet(it, onOpenFile, onShareFile, onClose = onCloseDeck) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val last = thread.lastOrNull()
     val lastStatus = (last as? ChatTurn.Plan)?.running?.second ?: (last as? ChatTurn.Typing)?.status
@@ -135,7 +137,6 @@ fun AskScreen(
                     onAttach?.let { HiveAction("Read photos into a table", HiveIcons.photo, onClick = it) },
                     HiveAction("New chat", HiveIcons.newChat, enabled = thread.isNotEmpty(), onClick = onClearHistory),
                 ),
-                above = { PolicyPill(state.policy, onPolicy) },
             )
         },
     ) {
@@ -148,7 +149,8 @@ fun AskScreen(
                     is ChatTurn.Plan -> SwarmTurn { PlanBody(t.options, t.running, onChoose) }
                     is ChatTurn.Answer -> SwarmTurn {
                         AnswerBody(t.item, t.answer, expanded = t.item.id in state.expandedSteps, reRunning = state.reRunningId == t.answer.answerId,
-                            onToggle = { onToggleSteps(t.item.id) }, onNotAccurate = { onNotAccurate(t.item, null) }, onOpenJob = { onOpenJob(t.item) })
+                            onToggle = { onToggleSteps(t.item.id) }, onNotAccurate = { onNotAccurate(t.item, null) }, onOpenJob = { onOpenJob(t.item) },
+                            onPresent = onPresent, onOpenFile = onOpenFile, onShareFile = onShareFile)
                     }
                     is ChatTurn.Refused -> SwarmTurn { RefusalCard(t.refusal, title = "Nothing ran") }
                     is ChatTurn.Error -> SwarmTurn {
@@ -191,19 +193,6 @@ private fun Greeting(statusLine: String?, suggestions: List<Suggestion>, onSugge
     }
 }
 
-/** "Local first" pill above the composer; tapping cycles the cloud policy. */
-@Composable
-private fun PolicyPill(policy: CloudPolicy, onPolicy: (CloudPolicy) -> Unit) {
-    val next = CloudPolicy.entries[(policy.ordinal + 1) % CloudPolicy.entries.size]
-    Row(Modifier.fillMaxWidth().padding(horizontal = HiveSpacing.xs), verticalAlignment = Alignment.CenterVertically) {
-        StatusPill(policy.short, Tone.Accent, icon = policy.icon(),
-            modifier = Modifier.clip(HiveShape.pill).clickable { onPolicy(next) }.semantics { contentDescription = "Cloud policy ${policy.label}. Tap for ${next.label}" })
-        Spacer(Modifier.width(HiveSpacing.sm))
-        Text(if (policy == CloudPolicy.ASK) "You pick LOCAL or CLOUD for every plan" else policy.blurb, style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-    }
-}
-
 @Composable
 private fun ClarifyBody(c: PlanOptions.Clarify, onReading: (String) -> Unit) {
     Text(c.question, style = MaterialTheme.typography.bodyLarge)
@@ -211,12 +200,12 @@ private fun ClarifyBody(c: PlanOptions.Clarify, onReading: (String) -> Unit) {
     c.readings.forEach { r -> HiveButton(HiveAction(r, HiveIcons.ask) { onReading(r) }, ButtonKind.Tonal, Modifier.fillMaxWidth()) }
 }
 
-/** The plan card (spec section 17): one step per line, then LOCAL and CLOUD side by side. */
+/** The plan card (spec section 17): one step per line, then the LOCAL run option. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PlanBody(o: PlanOptions.Ready, running: Pair<RunMode, String>?, onChoose: (RunMode) -> Unit) {
     val plan = o.plan
-    Text(if (running == null) "Here is the plan. Choose where it runs." else "Running ${running.first.name.lowercase()}.", style = MaterialTheme.typography.bodyLarge)
+    Text(if (running == null) "Here is the plan. Tap to run it on your phones." else "Running ${running.first.name.lowercase()}.", style = MaterialTheme.typography.bodyLarge)
     HiveCard {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(HiveSpacing.xs), verticalArrangement = Arrangement.spacedBy(HiveSpacing.xs)) {
             StatusPill("plan ${plan.tier}", Tone.Accent)
@@ -229,12 +218,8 @@ fun PlanBody(o: PlanOptions.Ready, running: Pair<RunMode, String>?, onChoose: (R
         })
         if (com.hivecore.ui.design.LocalShowHashes.current) Text("plan ${Format.shortHash(plan.planHash)}", style = HiveTextStyles.monoSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-    Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(HiveSpacing.sm)) {
-        ModeOption(o.local, RunMode.LOCAL, o.localBlockedReason, selected = running?.first == RunMode.LOCAL, suggested = o.suggested == RunMode.LOCAL,
-            enabled = running == null || running.first != RunMode.LOCAL, onChoose, Modifier.weight(1f).fillMaxHeight())
-        ModeOption(o.cloud, RunMode.CLOUD, o.cloudBlockedReason, selected = running?.first == RunMode.CLOUD, suggested = o.suggested == RunMode.CLOUD,
-            enabled = running == null || running.first != RunMode.CLOUD, onChoose, Modifier.weight(1f).fillMaxHeight())
-    }
+    ModeOption(o.local, RunMode.LOCAL, o.localBlockedReason, selected = running?.first == RunMode.LOCAL,
+        enabled = running == null || running.first != RunMode.LOCAL, onChoose, Modifier.fillMaxWidth())
     if (running != null) {
         LinearProgressIndicator(Modifier.fillMaxWidth())
         TypingIndicator(running.second)
@@ -242,7 +227,7 @@ fun PlanBody(o: PlanOptions.Ready, running: Pair<RunMode, String>?, onChoose: (R
 }
 
 @Composable
-private fun ModeOption(e: ModeEstimate?, mode: RunMode, blocked: String?, selected: Boolean, suggested: Boolean, enabled: Boolean, onChoose: (RunMode) -> Unit, modifier: Modifier) {
+private fun ModeOption(e: ModeEstimate?, mode: RunMode, blocked: String?, selected: Boolean, enabled: Boolean, onChoose: (RunMode) -> Unit, modifier: Modifier) {
     val available = e != null
     HiveCard(
         modifier, tone = if (mode == RunMode.CLOUD) CardTone.Cloud else CardTone.Tonal,
@@ -254,7 +239,6 @@ private fun ModeOption(e: ModeEstimate?, mode: RunMode, blocked: String?, select
             Icon(if (mode == RunMode.CLOUD) HiveIcons.cloud else HiveIcons.phone, contentDescription = null, modifier = Modifier.size(HiveSpacing.iconSm))
             Spacer(Modifier.width(HiveSpacing.xs))
             Text(mode.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-            if (suggested && available) StatusPill("suggested", Tone.Accent)
         }
         Spacer(Modifier.height(HiveSpacing.sm))
         if (e != null) {
@@ -265,11 +249,14 @@ private fun ModeOption(e: ModeEstimate?, mode: RunMode, blocked: String?, select
     }
 }
 
-/** The answer with provenance and badges (verified, unverified, cloud) and the "not accurate" action. */
+/** The answer with provenance and badges (verified, unverified, cloud), the deck card when the plan produced one, and the "not accurate" action. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun AnswerBody(item: AskViewModel.HistoryItem, a: AskAnswer, expanded: Boolean, reRunning: Boolean, onToggle: () -> Unit, onNotAccurate: () -> Unit, onOpenJob: () -> Unit) {
+fun AnswerBody(item: AskViewModel.HistoryItem, a: AskAnswer, expanded: Boolean, reRunning: Boolean, onToggle: () -> Unit, onNotAccurate: () -> Unit, onOpenJob: () -> Unit,
+               onPresent: (Deck) -> Unit = {}, onOpenFile: ((String) -> Unit)? = null, onShareFile: ((String) -> Unit)? = null) {
     Text(a.text, style = MaterialTheme.typography.bodyLarge)
+    a.deck?.let { d -> DeckCard(d, onPresent = { onPresent(d) }, onOpenFile = onOpenFile, onShareFile = onShareFile) }
+    a.picture?.let { p -> PictureCard(p, onOpenFile = onOpenFile, onShareFile = onShareFile) }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(HiveSpacing.xs), verticalArrangement = Arrangement.spacedBy(HiveSpacing.xs)) {
         when (a.badge) {
             AnswerBadge.VERIFIED -> StatusPill("verified", Tone.Ok, icon = HiveIcons.check)
@@ -302,6 +289,17 @@ fun AnswerBody(item: AskViewModel.HistoryItem, a: AskAnswer, expanded: Boolean, 
 @Composable
 private fun HomeEmptyPreview() = HiveCoreTheme {
     AskScreen(AskViewModel.UiState(), {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, statusLine = "3 phones ready · qwen3-4b loaded · nothing leaves your phones")
+}
+
+@HivePreviews
+@Composable
+private fun HomeDeckPreview() = HiveCoreTheme {
+    val deck = SampleDeck.DECK.copy(file = "/data/decks/deck-3f9a1c.pptx", bytes = 48_120)
+    val answer = AskAnswer("a1", "7e1d0a90", "${'$'}{deck.summary} Deck: 5 slides, \"${'$'}{deck.title}\", saved as .pptx.",
+        listOf(com.hivecore.core.Provenance("Sales", "2,880 rows → 36 monthly totals"), com.hivecore.core.Provenance("This phone", "5 slides assembled")),
+        AnswerBadge.UNVERIFIED, emptyList(), RunMode.LOCAL, deck = deck, elapsedMs = 9_200)
+    val item = AskViewModel.HistoryItem(1, AskSuggestions.DECK_REQUEST, AskViewModel.Outcome.Answer(answer), 0L, RunMode.LOCAL)
+    AskScreen(AskViewModel.UiState(history = listOf(item)), {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, onOpenFile = {}, onShareFile = {})
 }
 
 @HivePreviews

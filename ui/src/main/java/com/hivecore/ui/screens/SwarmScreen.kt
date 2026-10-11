@@ -49,20 +49,29 @@ import com.hivecore.ui.design.Tone
 import com.hivecore.ui.design.listOrEmpty
 import com.hivecore.ui.design.section
 import com.hivecore.ui.ports.JoinRequestView
+import com.hivecore.ui.ports.PairPingView
+import com.hivecore.ui.ports.PingReplyView
 import com.hivecore.ui.ports.SasView
+import com.hivecore.ui.vm.ComputeCredits
+import com.hivecore.ui.vm.CreditsViewModel
 import com.hivecore.ui.vm.SwarmViewModel
 import com.hivecore.ui.vm.SwarmViewModel.Pairing
 import com.hivecore.ui.vm.SwarmViewModel.Tile
 import kotlinx.coroutines.delay
 
-/** Swarm route: collects [SwarmViewModel] and refreshes the tiles every few seconds while visible. */
+/**
+ * Swarm route: collects [SwarmViewModel] (and the compute points when the app passes [credits]) and refreshes the
+ * tiles every few seconds while visible.
+ */
 @Composable
-fun SwarmRoute(vm: SwarmViewModel) {
+fun SwarmRoute(vm: SwarmViewModel, credits: CreditsViewModel? = null) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val points = credits?.state?.collectAsStateWithLifecycle()?.value
     LaunchedEffect(Unit) { while (true) { vm.refresh(); delay(5_000) } }
     SwarmScreen(state, onOptIn = vm::setOptIn, onShowQr = { vm.showInvite(asLink = false) }, onInviteLink = { vm.showInvite(asLink = true) }, onScan = vm::scan,
         onCopyInvite = vm::copyInvite, onShareInvite = vm::shareInvite, onLink = vm::setLink, onJoin = { vm.join() }, onClosePairing = vm::closePairing, onConfirm = vm::confirmSas,
-        onApprove = vm::approve, onRevoke = vm::revoke, onHandOver = vm::handOver, onDismissMessage = vm::dismissMessage)
+        onApprove = vm::approve, onRevoke = vm::revoke, onHandOver = vm::handOver, onDismissMessage = vm::dismissMessage,
+        onPingNearby = vm::pingNearby, onAnswerPing = vm::answerPing, credits = points)
 }
 
 @Composable
@@ -83,6 +92,10 @@ fun SwarmScreen(
     onHandOver: (String) -> Unit,
     onDismissMessage: () -> Unit,
     modifier: Modifier = Modifier,
+    onPingNearby: () -> Unit = {},
+    onAnswerPing: (PairPingView, Boolean) -> Unit = { _, _ -> },
+    /** the compute points balance; null hides the card */
+    credits: CreditsViewModel.UiState? = null,
 ) {
     val self = state.tiles.firstOrNull { it.self }
     val others = state.tiles.filter { !it.self }
@@ -94,25 +107,33 @@ fun SwarmScreen(
             tryPrompt = "Compare invoice spend with revenue in Q3"),
         subtitle = state.rosterLine,
         message = state.message, onDismissMessage = onDismissMessage,
-        primaryAction = if (state.pairing == Pairing.None && state.sas.isEmpty()) HiveAction("Pair a phone", HiveIcons.qr, enabled = !state.busy, onClick = onShowQr) else null,
+        primaryAction = if (state.pairing == Pairing.None && state.sas.isEmpty() && state.pings.isEmpty()) HiveAction("Ping nearby", HiveIcons.ping, enabled = !state.busy, onClick = onPingNearby) else null,
     ) {
         items(state.sas.size, key = { "sas-" + state.sas[it].handshakeId }) { i -> SasCard(state.sas[i], onConfirm) }
+        items(state.pings.size, key = { "ping-" + state.pings[it].id }) { i -> PairPingCard(state.pings[i], enabled = !state.busy, onAnswerPing) }
 
         item("self") { ThisPhoneCard(self, state, onOptIn) }
+
+        if (credits != null) {
+            section("Compute points")
+            item("credits") { CreditsCard(credits) }
+        }
 
         section("Pairing")
         when (val p = state.pairing) {
             is Pairing.ShowInvite -> item("invite") { InviteCard(p, onCopyInvite, onShareInvite, onClosePairing) }
             is Pairing.EnterLink -> item("enter") { EnterLinkCard(p, onLink, onJoin, onClosePairing) }
+            is Pairing.Pinged -> item("pinged") { PingedCard(p, onPingNearby, onClosePairing, enabled = !state.busy) }
             Pairing.None -> item("pairing") {
                 HiveCard {
-                    Text("Same room: show a QR code and scan it on the other phone. Far away: send an invite link and read the six digits aloud.",
+                    Text("Same Wi-Fi: ping nearby and every phone gets an Approve / Deny request. Same room: show a QR code and scan it on the other phone. Far away: send an invite link and read the six digits aloud.",
                         style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(HiveSpacing.md))
-                    ActionRow(HiveAction("Show QR", HiveIcons.qr, enabled = !state.busy, onClick = onShowQr), listOf(
+                    ActionRow(HiveAction("Ping nearby", HiveIcons.ping, enabled = !state.busy, onClick = onPingNearby), listOf(
+                        HiveAction("Show QR", HiveIcons.qr, enabled = !state.busy, onClick = onShowQr),
                         HiveAction("Scan QR", HiveIcons.scan, enabled = !state.busy, onClick = onScan),
                         HiveAction("Invite link", HiveIcons.share, enabled = !state.busy, onClick = onInviteLink),
-                    ))
+                    ), maxInline = 3)
                 }
             }
         }
@@ -124,7 +145,7 @@ fun SwarmScreen(
 
         section("Phones", trailing = { StatusPill(Format.plural(others.size, "phone"), Tone.Neutral) })
         if (others.isEmpty()) listOrEmpty(emptyList<Tile>(), key = { it.nodeId }, emptyKey = "tiles-empty", emptyTitle = "No other phones yet",
-            emptyDetail = "Show a QR code or send an invite link to pair the first one", emptyIcon = HiveIcons.phone) {}
+            emptyDetail = "Ping nearby, show a QR code or send an invite link to pair the first one", emptyIcon = HiveIcons.phone) {}
         else items(others.chunked(2).size, key = { "row-" + others.chunked(2)[it].first().nodeId }) { i ->
             val pair = others.chunked(2)[i]
             Row(horizontalArrangement = Arrangement.spacedBy(HiveSpacing.sm)) {
@@ -210,6 +231,60 @@ private fun SasCard(s: SasView, onConfirm: (SasView, Boolean) -> Unit) {
     )
 }
 
+/** Another phone on this Wi-Fi asked to pair: Approve joins its invite (the six digits follow), Deny tells it so. */
+@Composable
+private fun PairPingCard(p: PairPingView, enabled: Boolean, onAnswer: (PairPingView, Boolean) -> Unit) {
+    HiveCard(tone = CardTone.Accent) {
+        ListRow("${p.fromName} wants to pair with this phone", supporting = "Same Wi-Fi · asked at ${Format.clock(p.ts)} · approving shows six digits to compare",
+            leading = { Avatar(p.fromName, icon = HiveIcons.ping) })
+        Spacer(Modifier.height(HiveSpacing.sm))
+        ActionRow(HiveAction("Approve", HiveIcons.check, enabled = enabled) { onAnswer(p, true) },
+            listOf(HiveAction("Deny", HiveIcons.close, enabled = enabled, destructive = true) { onAnswer(p, false) }))
+    }
+}
+
+/** This phone pinged the Wi-Fi: who answered so far, and the invite it carried for a phone that missed the ping. */
+@Composable
+private fun PingedCard(p: Pairing.Pinged, onPingAgain: () -> Unit, onClose: () -> Unit, enabled: Boolean) {
+    HeroCard(
+        headline = if (p.replies.isEmpty()) "Pinged" else "${p.approved} approved", caption = p.summary, tone = CardTone.Tonal, icon = HiveIcons.ping,
+        headlineStyle = MaterialTheme.typography.headlineMedium,
+        pills = {
+            StatusPill("valid until ${Format.clock(p.invite.expiresTs)}", Tone.Neutral)
+            if (p.approved > 0) StatusPill("${Format.plural(p.approved, "phone")} comparing digits", Tone.Ok)
+            if (p.denied > 0) StatusPill(Format.plural(p.denied, "denial"), Tone.Warn)
+        },
+        primary = HiveAction("Ping again", HiveIcons.refresh, enabled = enabled, onClick = onPingAgain),
+        secondaries = listOf(HiveAction("Done", HiveIcons.close, onClick = onClose)),
+    ) {
+        Spacer(Modifier.height(HiveSpacing.sm))
+        Text("Every phone on this Wi-Fi with HiveCore open got an Approve / Deny card. A phone that approves shows the same six digits as this one; confirm them on both.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** The compute points balance: earned by lending this phone's NPU, spent on requests from Home. */
+@Composable
+private fun CreditsCard(c: CreditsViewModel.UiState) {
+    HeroCard(
+        headline = c.balanceLine, caption = c.detail, tone = if (c.low) CardTone.Warn else CardTone.Answer, icon = HiveIcons.star,
+        headlineDescription = "Balance ${c.balanceLine}",
+        pills = {
+            StatusPill("earned ${c.earned}", Tone.Ok)
+            StatusPill("spent ${c.spent}", Tone.Neutral)
+            if (c.jobs > 0) StatusPill("${Format.plural(c.jobs, "job")} · ${Format.duration(c.computeMs)} of compute", Tone.Accent)
+        },
+    ) {
+        Spacer(Modifier.height(HiveSpacing.sm))
+        Text("${ComputeCredits.POINTS_PER_SECOND} point per second this phone computes for another phone, paid when the job settles.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (c.recent.isNotEmpty()) {
+            Spacer(Modifier.height(HiveSpacing.sm))
+            c.recent.forEach { a -> Text("${a.line} · ${Format.clock(a.ts)}", style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
+    }
+}
+
 @Composable
 private fun InviteCard(p: Pairing.ShowInvite, onCopy: () -> Unit, onShare: () -> Unit, onClose: () -> Unit) {
     HiveCard(contentPadding = HiveSpacing.hero) {
@@ -256,7 +331,12 @@ private fun SwarmPreview() = HiveCoreTheme {
         Tile("sales", "Sales", false, false, "online via LAN", true, "64 % ⚡", false, "Cool · 31 °C", false, "qwen3-4b (big slot)", emptyList(), 2, emptyList(), "Eligible · heavy work OK", true),
         Tile("accounts", "Accounts", false, false, "offline (last seen 48 s ago)", false, "31 %", true, "Hot · 36 °C", true, "no big model", emptyList(), 0, listOf("llm.json until 14:32"), "Not eligible: battery 31 %", false),
     )
+    val now = System.currentTimeMillis()
     SwarmScreen(SwarmViewModel.UiState(wired = true, isAdmin = true, tiles = tiles, optIn = true, eligibleNow = true,
-        roster = com.hivecore.ui.ports.RosterView("g1", 3, "self", listOf(com.hivecore.ui.ports.MemberView("self", "This phone", true)))),
-        {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {})
+        roster = com.hivecore.ui.ports.RosterView("g1", 3, "self", listOf(com.hivecore.ui.ports.MemberView("self", "This phone", true))),
+        pings = listOf(PairPingView("p1", "HR", now - 20_000)),
+        pairing = Pairing.Pinged(com.hivecore.ui.ports.InviteView("swarm://join?g=g1&k=k&t=t", now + 9 * 60_000L), listOf(PingReplyView("Sales", true, now), PingReplyView("Accounts", false, now)))),
+        {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {},
+        credits = CreditsViewModel.UiState(balance = 127, earned = 92, spent = 15, computeMs = 71_400, jobs = 3,
+            recent = listOf(ComputeCredits.Award("j1#1", "sales", "Sales", 41_600, 4, 42, now - 60_000))))
 }

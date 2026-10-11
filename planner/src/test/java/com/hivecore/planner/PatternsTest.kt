@@ -25,16 +25,16 @@ class PatternsTest {
     private val region = DimensionSlot("region", "region")
     private val thisYear = PeriodSlot("this year", "2026-01", "2026-12")
 
-    @Test fun loadsTheTenPatterns() {
-        assertEquals("1", patterns.version)
+    @Test fun loadsTheTwelvePatterns() {
+        assertEquals("3", patterns.version)
         assertEquals(listOf("per_unit", "compare_two", "growth_over_period", "top_k_by", "flag_vs_average", "reconcile_counts",
-            "ratio_then_rank", "multi_doc_extract", "bulk_ocr_close", "eval_sweep"), patterns.all.map { it.id })
+            "ratio_then_rank", "multi_doc_extract", "deck_growth", "make_image", "bulk_ocr_close", "eval_sweep"), patterns.all.map { it.id })
         assertEquals(setOf("bulk_ocr_close", "eval_sweep"), patterns.all.filter { it.bulk }.map { it.id }.toSet())
     }
 
     @Test fun perUnitBindsOwnersQuestionsAndExpect() {
         val dag = patterns.bind(p("per_unit"), mapOf("numerator" to revenue, "denominator" to reps, "by" to region, "period" to thisYear), catalogs).getOrThrow()
-        assertEquals("per_unit", dag.patternId); assertEquals("1", dag.patternsVersion); assertEquals("r", dag.output)
+        assertEquals("per_unit", dag.patternId); assertEquals("3", dag.patternsVersion); assertEquals("r", dag.output)
         assertEquals(listOf("a", "b", "r"), dag.tasks.map { it.id })
         val (a, b, r) = dag.tasks
         assertEquals(SALES, a.owner); assertEquals(HR, b.owner); assertEquals(null, r.owner)

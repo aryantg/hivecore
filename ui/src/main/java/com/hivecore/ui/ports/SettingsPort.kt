@@ -7,7 +7,7 @@ package com.hivecore.ui.ports
 
 /** Spec section 9.2 policy settings. */
 enum class CloudPolicy(val key: String, val label: String, val blurb: String) {
-    ASK("ask", "Ask every time", "Every plan shows LOCAL and CLOUD with estimates; you pick."),
+    ASK("ask", "Ask every time", "Runs on your phones at once; you pick only when LOCAL is not available."),
     LOCAL_UNLESS_IMPOSSIBLE("local_unless_impossible", "Local unless impossible", "Runs on your phones; cloud only for a step no local model can do."),
     FASTEST("fastest", "Fastest", "Picks the quicker option within the caps; private steps stay local.");
 

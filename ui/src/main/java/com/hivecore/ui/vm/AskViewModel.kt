@@ -2,6 +2,7 @@ package com.hivecore.ui.vm
 
 import com.hivecore.core.KeyValuePrefs
 import com.hivecore.core.SLog
+import com.hivecore.engine.deck.Deck
 import com.hivecore.ui.ports.AskAnswer
 import com.hivecore.ui.ports.AskEvent
 import com.hivecore.ui.ports.AskPlan
@@ -68,6 +69,8 @@ class AskViewModel(
         /** the request being planned or run: the user's latest chat bubble (the composer is already cleared) */
         val inFlight: String? = null,
         val suggestions: List<Suggestion> = AskSuggestions.DEFAULT,
+        /** the deck open in the presenter sheet */
+        val presenting: Deck? = null,
     ) {
         val busy: Boolean get() = phase is Phase.Planning || phase is Phase.Running
         /** The conversation, oldest first (the chat Home renders it). */
@@ -85,6 +88,14 @@ class AskViewModel(
     /** Opens the Jobs screen with a recipe selected (a suggestion that needs files, set by the app's navigation). */
     var openRecipe: (String) -> Unit = { SLog.w(TAG, "openRecipe not wired: $it") }
 
+    /** Opens a produced file (a deck's .pptx) in another app; set by the app (a content URI through its file provider). */
+    var openFile: (String) -> Unit = { SLog.w(TAG, "openFile not wired: $it") }
+
+    /** Hands a produced file to the share sheet; set by the app. */
+    var shareFile: (String) -> Unit = { SLog.w(TAG, "shareFile not wired: $it") }
+    /** A request left the composer (the compute points spend on it). */
+    var onSubmitted: (String) -> Unit = {}
+
     private var job: Job? = null
     private var nextId = 1L
 
@@ -93,7 +104,7 @@ class AskViewModel(
     /** Re-reads the cloud policy (the Settings screen may have changed it). */
     fun refreshPolicy() { _state.update { it.copy(policy = CloudPolicy.of(prefs.getString(SettingsKeys.CLOUD_POLICY, null))) } }
 
-    /** Submit: plans the request, then either waits for the choice or starts per the policy. */
+    /** Submit: plans the request, then starts per the policy (waits on the plan panel only when nothing can start). */
     fun submit() {
         val q = _state.value.request.trim()
         if (q.isEmpty()) { _state.update { it.copy(phase = Phase.Error("Type a request first")) }; return }
@@ -102,6 +113,7 @@ class AskViewModel(
         job?.cancel()
         _state.update { it.copy(phase = Phase.Planning, message = null, inFlight = q, request = "") }
         SLog.d(TAG, "plan: $q")
+        runCatching { onSubmitted(q) }.onFailure { SLog.w(TAG, "onSubmitted failed: ${it.message}") }
         job = scope.launch {
             val options = try { port.plan(q) } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 SLog.e(TAG, "plan failed", e)
@@ -109,12 +121,12 @@ class AskViewModel(
                 return@launch
             }
             when (options) {
+                is PlanOptions.Answered -> record(q, Outcome.Answer(options.answer), null)
                 is PlanOptions.Refused -> record(q, Outcome.Refused(options.refusal), null)
                 is PlanOptions.Clarify -> _state.update { it.copy(phase = Phase.Clarifying(options)) }
                 is PlanOptions.Ready -> {
-                    val policy = _state.value.policy
-                    val pick = defaultMode(policy, options)
-                    if (policy == CloudPolicy.ASK || pick == null) _state.update { it.copy(phase = Phase.Choosing(options)) }
+                    val pick = defaultMode(_state.value.policy, options)
+                    if (pick == null) _state.update { it.copy(phase = Phase.Choosing(options)) }
                     else start(options, pick)
                 }
             }
@@ -165,6 +177,10 @@ class AskViewModel(
 
     /** The composer's policy pill: the same setting as Settings' cloud policy. */
     fun setPolicy(p: CloudPolicy) { prefs.putString(SettingsKeys.CLOUD_POLICY, p.key); _state.update { it.copy(policy = p) } }
+    /** "Present": the deck fills the presenter sheet; [closeDeck] puts it away. */
+    fun present(deck: Deck) { _state.update { it.copy(presenting = deck) } }
+    fun closeDeck() { _state.update { it.copy(presenting = null) } }
+
     fun toggleSteps(id: Long) { _state.update { it.copy(expandedSteps = if (id in it.expandedSteps) it.expandedSteps - id else it.expandedSteps + id) } }
     fun openJob(item: HistoryItem) { item.answer?.jobId?.let { openJob(it) } }
 
@@ -233,9 +249,12 @@ class AskViewModel(
             (if (mode == RunMode.LOCAL) o.localBlockedReason else o.cloudBlockedReason)?.let { "${mode.name} is not available: $it" }
                 ?: "${mode.name} is not available for this plan"
 
-        /** Spec section 9.2: the policy's default, or null when the policy wants the user to choose. */
+        /**
+         * Spec section 9.2: the policy's default, or null when nothing can start on its own. Home offers no cloud
+         * choice, so ASK starts LOCAL at once and waits on the plan panel only when LOCAL is unavailable.
+         */
         fun defaultMode(policy: CloudPolicy, o: PlanOptions.Ready): RunMode? = when (policy) {
-            CloudPolicy.ASK -> null
+            CloudPolicy.ASK -> if (o.local != null) RunMode.LOCAL else null
             CloudPolicy.LOCAL_UNLESS_IMPOSSIBLE -> when { o.local != null -> RunMode.LOCAL; o.cloud != null -> RunMode.CLOUD; else -> null }
             CloudPolicy.FASTEST -> listOfNotNull(o.local, o.cloud).minByOrNull { it.ms }?.mode
         }

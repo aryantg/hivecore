@@ -180,7 +180,7 @@ class SwarmHarness(private val testScope: TestScope, private val debugRouters: B
             router = MeshRouterAdapter(router), selfName = name, scope = scope, schema = store,
             intentPlanner = intentPlanner, compiler = RuleIntentCompiler(), executor = SqlQueryExecutor(db) { AnswerChip.LLM },
             approval = gate, guard = guard, planner = planner, planCompiler = PlanCompilerImpl(), policy = policy, ledger = ledger, runner = runner,
-            extraExecutors = listOf(extract), blobDir = blobRoot?.let { File(it, id) },
+            extraExecutors = listOf(extract), blobDir = blobRoot?.let { File(it, id) }, deckDir = blobRoot?.let { File(it, "$id-decks") },
             nameOf = { nid -> nodes.values.firstOrNull { it.nodeId == nid }?.name ?: nid.take(8) },
             modelHash = { "m1" }, clock = now, escalator = escalator,
             journal = if (memoize) journal else JobJournal.None, memo = if (memoize) memo else ChunkMemo.None,

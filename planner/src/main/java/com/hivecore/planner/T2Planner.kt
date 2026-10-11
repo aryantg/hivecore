@@ -103,7 +103,8 @@ object CapabilityCues {
         "asr" to listOf("transcribe", "transcript", "transcription", "recording", "recordings", "audio", "voice note"),
         "vlm" to listOf("photo", "photos", "picture", "pictures", "image", "images", "screenshot", "screenshots"),
         "detect" to listOf("detect", "count the people", "objects in"),
-        "image.gen" to listOf("draw", "generate an image", "illustration"),
+        "image.gen" to listOf("draw", "drawing", "sketch", "illustrate", "illustration", "illustrations", "image of", "images of",
+            "picture of", "pictures of", "create an image", "make an image", "generate an image", "generate images", "logo", "poster", "artwork"),
         "llm.json" to listOf("extract fields", "fill in", "structured"),
         "llm.text" to listOf("summarise", "summarize", "summary", "translate", "rewrite"),
     )
@@ -120,9 +121,13 @@ object CapabilityCues {
         else -> null
     }
 
-    /** Capabilities whose cue words occur in [question] as whole words (case-insensitive, plural-insensitive). */
+    /**
+     * Capabilities whose cue words occur in [question] as whole words (case-insensitive, plural-insensitive). A request
+     * to draw ("create an image of …") names image.gen only: its "image" is the one being made, not one being looked at.
+     */
     fun named(question: String): Set<String> {
         val q = QText(question)
-        return WORDS.filterValues { words -> words.any { q.find(it) != null } }.keys
+        val named = WORDS.filterValues { words -> words.any { q.find(it) != null } }.keys
+        return if ("image.gen" in named) named - "vlm" else named
     }
 }
